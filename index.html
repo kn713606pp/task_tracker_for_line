@@ -1,0 +1,2418 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>工作任務追蹤平台</title>
+    <script src="env.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+ 
+   <style>
+        body { 
+            font-family: 'Inter', 'Noto Sans TC', sans-serif;
+            background-color: #f8fafc;
+        }
+        .task-card { 
+            transition: box-shadow 0.2s ease-in-out, border-color 0.2s ease-in-out;
+            cursor: grab;
+        }
+        .task-card:active {
+            cursor: grabbing;
+        }
+        .btn-primary {
+            background-image: linear-gradient(to right, #4f46e5, #6366f1);
+            transition: all 0.3s ease-in-out;
+        }
+        .btn-primary:hover {
+            box-shadow: 0 4px 15px 0 rgba(79, 70, 229, 0.45);
+        }
+        .modal-overlay {
+            transition: opacity 0.2s ease-in-out;
+        }
+        .tab-active { 
+            color: #4338ca;
+            background-color: #eef2ff;
+        }
+        .tab-inactive { 
+            color: #475569;
+            background-color: transparent;
+        }
+        .sortable-ghost {
+            opacity: 0.4;
+            background: #eef2ff;
+            border: 2px dashed #6366f1;
+        }
+        mark {
+            background-color: #fef08a;
+            padding: 1px 2px;
+            border-radius: 3px;
+            color: #713f12;
+        }
+        .ai-btn-enabled {
+             background-color: #f0fdfa !important;
+             color: #0f766e !important;
+        }
+        .ai-btn-enabled:hover {
+             background-color: #ccfbf1 !important;
+        }
+        .category-tab .remove-category-btn, .category-tab .export-category-btn {
+            opacity: 0;
+            transition: opacity 0.2s ease-in-out;
+        }
+        .category-tab:hover .remove-category-btn, .category-tab:hover .export-category-btn {
+            opacity: 1;
+        }
+        
+        #welcome-overlay { opacity: 0;
+            visibility: hidden; transition: opacity 0.5s ease-out, visibility 0.5s; }
+        #welcome-overlay.visible { opacity: 1;
+            visibility: visible; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px);
+        } to { opacity: 1; transform: translateY(0); } }
+        .welcome-animate { animation: fadeIn 0.8s ease-out forwards;
+        }
+        .spinner { border-top-color: #fff; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg);
+        } }
+
+        .priority-badge-緊急 { background-color: #fef2f2; color: #b91c1c;
+        }
+        .priority-badge-高 { background-color: #fff7ed; color: #c2410c;
+        }
+        .priority-badge-中 { background-color: #eff6ff; color: #1d4ed8;
+        }
+        .priority-badge-低 { background-color: #f5f3ff; color: #6d28d9;
+        }
+
+        .sort-btn.sort-active { background-color: white; color: #4f46e5; box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        #department-tabs { flex-wrap: wrap; gap: 0.5rem;
+        }
+        
+        #trash-container { max-height: 0;
+            overflow: hidden; transition: max-height 0.5s ease-in-out; }
+        #trash-container.open { max-height: 500px;
+        }
+        .history-item:not(:last-child) { border-bottom: 1px dashed #e2e8f0;
+        }
+
+        .custom-input {
+            background-color: #f0fdf4 !important;
+            border-color: #a7f3d0 !important;
+        }
+        .custom-input:focus {
+            --tw-ring-color: #34d399 !important;
+            border-color: #10b981 !important;
+        }
+        #undo-bar {
+            transform: translateY(120%);
+            transition: transform 0.4s ease-in-out;
+        }
+        #undo-bar.show {
+            transform: translateY(0);
+        }
+        .task-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-in-out, padding-top 0.5s ease-in-out;
+            padding-top: 0;
+        }
+        .task-card.expanded .task-details {
+            max-height: 1000px;
+            padding-top: 1rem;
+        }
+        .expand-arrow {
+            transition: transform 0.3s ease-in-out;
+        }
+        .task-card.expanded .expand-arrow {
+            transform: rotate(180deg);
+        }
+        
+        @keyframes highlight { 0% { background-color: #eef2ff;
+        } 100% { background-color: white; } }
+        .task-highlight { animation: highlight 2s ease-out;
+        }
+    </style>
+</head>
+<body class="antialiased">
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-100 flex items-center justify-center z-[9999] transition-opacity duration-300">
+    <div class="text-center p-8 bg-white rounded-xl shadow-2xl max-w-sm w-full welcome-animate">
+        <h1 class="text-3xl font-bold text-slate-800 mb-2 tracking-tight">工作任務追蹤平台</h1>
+        <p class="text-slate-500 mb-8">請登入以繼續</p>
+        <div class="google-login-btn guest-only flex items-center justify-center px-6 py-3 border rounded-lg text-gray-700 font-medium bg-white hover:shadow-lg transition-all duration-300 cursor-pointer" onclick="authManager.signInWithGoogle()">
+            <svg class="w-6 h-6 mr-3" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+            </svg>
+            使用 Google 帳號登入
+        </div>
+        <div class="w-10 h-10 border-4 border-slate-200 rounded-full spinner mt-8 mx-auto" style="display: none;"></div>
+        <p id="auth-error-message" class="text-red-600 text-sm mt-4 h-5"></p>
+    </div>
+</div>
+    <div id="welcome-overlay" class="fixed inset-0 bg-indigo-600 flex items-center justify-center z-[9998]">
+        <div class="text-center text-white welcome-animate">
+            <h1 class="text-4xl font-bold tracking-wider">歡迎使用</h1>
+            <p class="mt-2 text-lg text-indigo-200">工作任務追蹤平台</p>
+        </div>
+ 
+    </div>
+
+    <div id="due-tasks-modal-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4 modal-overlay">
+        <div class="bg-white w-full max-w-lg rounded-xl shadow-xl flex flex-col max-h-[90vh]">
+             <div class="p-6 md:p-8 flex-grow overflow-y-auto">
+                <h2 class="text-xl font-semibold mb-4 text-slate-800 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2.5 text-amber-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.414-1.414L11 9.586V6z" clip-rule="evenodd" />
+                    </svg>
+                    到期任務提醒
+        
+                </h2>
+                <p class="text-sm text-slate-500 mb-6">以下是已過期或今日到期的任務，請點擊任務查看，或透過 Email/LINE 發送提醒。</p>
+                <div id="due-tasks-list" class="space-y-3">
+                </div>
+            </div>
+            <div class="bg-slate-50 px-6 py-4 flex justify-between items-center rounded-b-xl flex-shrink-0">
+     
+           <span id="due-tasks-status-msg" class="text-sm text-emerald-600 font-semibold transition-opacity duration-300 opacity-0"></span>
+                <div class="flex items-center justify-between">
+                    <button type="button" id="line-auto-remind-settings-btn" class="px-3 py-2 text-green-600 border border-green-600 rounded-md hover:bg-green-50 transition text-sm font-semibold flex items-center">
+                        <svg class="w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M8 0C3.58 0 0 3.58 0 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm4.74 11.6c-.24.59-1.39.8-1.63.83s-.45.09-.65.04c-.2-.04-.52-.22-.98-.44-.46-.22-1.6-1-3.47-2.65C4.22 8.23 3.4 6.9 3.32 6.81c-.09-.1-.24-.16-.24-.41s.14-.41.28-.55c.14-.14.3-.18.4-.18h.11c.14 0 .28.05.41.28s.32.74.37.84c.05.1.05.24 0 .37-.04.14-.13.23-.26.36s-.26.24-.35.3c-.09.07-.16.14-.14.24.02.1.22.46.73.97s1.1 1.25 1.18 1.33c.09.09.18.1.28.04.1-.05.28-.18.38-.28s.18-.2.26-.2.2 0 .3.05c.1.04.6.3 1.05.7.45.4.75.7.83.8.09.1.1.24.04.37-.05.14-.41.68-.65.92z"/>
+                        </svg>
+                        自動催辦設定
+                    </button>
+                    <div class="flex items-center space-x-3">
+                         <button type="button" id="copy-all-reminders-btn" class="px-4 py-2 bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition text-sm font-semibold flex items-center disabled:bg-slate-400 disabled:cursor-not-allowed">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor"><path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM5 11a1 1 0 100 2h4a1 1 0 100-2H5z" /></svg>
+                            一鍵複製所有LINE提醒
+                        </button>
+                        <button type="button" id="close-due-tasks-btn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition text-sm font-semibold">我知道了</button>
+                    </div>
+                </div>
+                </div>
+        </div>
+    </div>
+
+    <!-- LINE 自動催辦設定 Modal -->
+    <div id="line-auto-remind-modal-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4 modal-overlay">
+        <div class="bg-white w-full max-w-2xl rounded-xl shadow-xl flex flex-col max-h-[90vh]">
+             <div class="p-6 md:p-8 flex-grow overflow-y-auto">
+                <h2 class="text-xl font-semibold mb-4 text-slate-800 flex items-center">
+                    <svg class="w-6 h-6 mr-2.5 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+                        <path d="M8 0C3.58 0 0 3.58 0 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm4.74 11.6c-.24.59-1.39.8-1.63.83s-.45.09-.65.04c-.2-.04-.52-.22-.98-.44-.46-.22-1.6-1-3.47-2.65C4.22 8.23 3.4 6.9 3.32 6.81c-.09-.1-.24-.16-.24-.41s.14-.41.28-.55c.14-.14.3-.18.4-.18h.11c.14 0 .28.05.41.28s.32.74.37.84c.05.1.05.24 0 .37-.04.14-.13.23-.26.36s-.26.24-.35.3c-.09.07-.16.14-.14.24.02.1.22.46.73.97s1.1 1.25 1.18 1.33c.09.09.18.1.28.04.1-.05.28-.18.38-.28s.18-.2.26-.2.2 0 .3.05c.1.04.6.3 1.05.7.45.4.75.7.83.8.09.1.1.24.04.37-.05.14-.41.68-.65.92z"/>
+                    </svg>
+                    LINE 自動催辦設定
+                </h2>
+                
+                <div class="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
+                    <p class="text-sm text-blue-700">設定 LINE 自動催辦功能，系統將每日定時發送到期任務提醒至指定 LINE 群組或個人</p>
+                </div>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-2">啟用自動催辦</label>
+                        <div class="flex items-center space-x-4">
+                            <label class="flex items-center cursor-pointer">
+                                <input type="checkbox" id="enable-line-auto-remind" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+                                <span class="ml-3 text-sm font-medium text-slate-700">開啟</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-2">催辦時間</label>
+                        <input type="time" id="line-remind-time" value="09:00" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+                        <p class="text-xs text-slate-500 mt-1">每日將在此時間檢查並發送到期任務提醒</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-slate-600 mb-2">LINE 接收者</label>
+                        <select id="line-recipient-type" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition mb-3">
+                            <option value="group">群組 (Group)</option>
+                            <option value="user">個人 (User ID)</option>
+                        </select>
+                        <input type="text" id="line-recipient-id" placeholder="請輸入 LINE 群組 ID 或使用者 ID" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+                        <p class="text-xs text-slate-500 mt-1">如何取得 ID：將 LINE Bot 加入群組後，發送訊息時會自動記錄</p>
+                    </div>
+
+                    <div class="bg-amber-50 border border-amber-200 p-3 rounded-lg">
+                        <p class="text-sm text-amber-800 font-semibold mb-1">⚠️ 重要提醒：</p>
+                        <ul class="text-xs text-amber-700 space-y-1 ml-4 list-disc">
+                            <li>需要先在 LINE Developers Console 取得 Channel Access Token</li>
+                            <li>將 Token 填入 env.js 檔案中的 lineConfig.channelAccessToken</li>
+                            <li>確保 LINE Bot 已加入目標群組或已與使用者成為好友</li>
+                        </ul>
+                    </div>
+
+                    <button type="button" id="test-line-send-btn" class="w-full px-4 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-semibold flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"/>
+                            <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"/>
+                        </svg>
+                        測試發送
+                    </button>
+                </div>
+            </div>
+            <div class="bg-slate-50 px-6 py-4 flex justify-end items-center space-x-3 rounded-b-xl flex-shrink-0">
+                <button type="button" id="close-line-auto-remind-btn" class="px-4 py-2 bg-white text-slate-700 rounded-md hover:bg-slate-100 transition text-sm font-semibold border border-slate-300">關閉</button>
+                <button type="button" id="save-line-auto-remind-btn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition text-sm font-semibold">儲存設定</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="edit-modal-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4 modal-overlay">
+        <div class="bg-white w-full max-w-lg rounded-xl shadow-xl flex flex-col max-h-[90vh]">
+             <form id="edit-task-form" class="flex flex-col flex-grow min-h-0">
+ 
+               <div class="p-6 md:p-8 overflow-y-auto flex-grow">
+                    <h2 class="text-xl font-semibold mb-6 text-slate-800">編輯任務</h2>
+                    <div class="space-y-5">
+                         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+       
+                             <div>
+                                <label for="edit-task-priority" class="block text-sm font-medium text-slate-600 mb-1.5">優先度</label>
+                                <select id="edit-task-priority" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition"></select>
+                            </div>
+                            <div>
+                                <label for="edit-task-assignee" class="block text-sm font-medium text-slate-600 mb-1.5">負責人</label>
+  
+                               <input type="text" id="edit-task-assignee" list="assignee-list" placeholder="手動輸入或選擇..." class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+                            </div>
+                          
+                             <div>
+                                <label for="edit-task-department" class="block text-sm font-medium text-slate-600 mb-1.5">所屬部門 (轉移)</label>
+                                <div class="flex items-center space-x-2">
+                                    <select id="edit-task-department" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition"></select>
+                                    <button type="button" id="edit-department-name-btn" title="編輯目前部門名稱" class="p-2.5 text-slate-500 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-100 rounded-lg transition-colors flex-shrink-0">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                    </button>
+                                </div>
+                                <div class="mt-3 flex items-center">
+                                    <input id="edit-task-copy-checkbox" name="edit-task-copy-checkbox" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+                                    <label for="edit-task-copy-checkbox" class="ml-2 block text-sm font-medium text-slate-700">複製任務 (保留原任務)</label>
+                                </div>
+                             </div>
+                             <div>
+                                <label for="edit-task-due-date" class="block text-sm font-medium text-slate-600 mb-1.5">截止日期</label>
+        
+                                <input type="date" id="edit-task-due-date" class="custom-input w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+                            </div>
+                        </div>
+          
+                       <div>
+                            <label for="edit-task-title" class="block text-sm font-medium text-slate-600 mb-1.5">任務標題</label>
+                             <input type="text" id="edit-task-title" placeholder="請輸入任務標題..." class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition" required>
+       
+                         </div>
+                        <div>
+                            <label for="edit-task-desc" class="block text-sm font-medium text-slate-600 mb-1.5">任務描述</label>
+                         
+                           <textarea id="edit-task-desc" rows="4" placeholder="請輸入任務描述..." class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-slate-50 px-6 py-4 flex justify-end items-center space-x-3 rounded-b-xl flex-shrink-0">
+                    <button type="button" id="cancel-edit-btn" class="px-4 py-2 bg-white text-slate-700 rounded-md hover:bg-slate-100 transition text-sm font-semibold border border-slate-300">取消</button>
+                    <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition text-sm font-semibold">儲存變更</button>
+                </div>
+            </form>
+      
+         </div>
+    </div>
+    
+    <div id="import-modal-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4 modal-overlay">
+        <div class="bg-white w-full max-w-xl rounded-xl shadow-xl flex flex-col max-h-[90vh]">
+             <div class="p-6 md:p-8 flex-grow overflow-y-auto">
+                <h2 class="text-xl font-semibold mb-4 text-slate-800">匯入任務</h2>
+                <p class="text-sm text-slate-500 mb-6">請將從 AI 助理取得的 JSON 文字內容直接貼到下方文字框中，並選擇要匯入的目標部門。</p>
+                <div class="mb-4">
+                    <label for="import-task-department" class="block text-sm font-medium text-slate-600 mb-1.5">匯入至部門</label>
+                    <div class="flex items-center space-x-2">
+                        <select id="import-task-department" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition"></select>
+                        <button type="button" id="add-department-from-import-btn" class="px-4 py-2.5 text-sm font-semibold text-indigo-600 hover:bg-indigo-100 rounded-md transition-colors flex-shrink-0">+ 新增</button>
+                    </div>
+                </div>
+                <textarea id="import-textarea" rows="8" placeholder="貼上 JSON 內容..." class="custom-input w-full p-4 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition"></textarea>
+                <p id="import-status-message" class="text-sm text-center text-red-600 h-5 mt-2"></p>
+            </div>
+            <div class="bg-slate-50 px-6 py-4 flex justify-end items-center space-x-3 rounded-b-xl flex-shrink-0">
+                <button type="button" id="cancel-import-btn" class="px-4 py-2 bg-white text-slate-700 rounded-md hover:bg-slate-100 transition text-sm font-semibold border border-slate-300">取消</button>
+        
+                <button type="button" id="confirm-import-btn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition text-sm font-semibold">確認匯入</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="status-reason-modal-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4 modal-overlay">
+        <div class="bg-white w-full max-w-md rounded-xl shadow-xl">
+             <form id="status-reason-form">
+               
+                 <div class="p-6 md:p-8">
+                    <h2 class="text-xl font-semibold mb-2 text-slate-800">狀態變更</h2>
+                    <p class="text-sm text-slate-500 mb-4">請為狀態變更「<span id="new-status-label" class="font-bold"></span>」提供原因 (可選)。</p>
+                    <input type="text" id="status-reason-input" placeholder="例如：等待客戶提供資料..." class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+            
+                </div>
+                <div class="bg-slate-50 px-6 py-4 flex justify-end items-center space-x-3 rounded-b-xl">
+                    <button type="button" id="cancel-status-reason-btn" class="px-4 py-2 bg-white text-slate-700 rounded-md hover:bg-slate-100 transition text-sm font-semibold border border-slate-300">略過</button>
+                    <button type="submit" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition text-sm font-semibold">儲存</button>
+         
+               </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="history-modal-overlay" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden items-center justify-center z-50 p-4 modal-overlay">
+        <div class="bg-white w-full max-w-lg rounded-xl shadow-xl">
+             <div class="p-6 md:p-8">
+                <h2 class="text-xl font-semibold mb-4 text-slate-800">任務歷史紀錄</h2>
+      
+                  <div id="history-list" class="space-y-3 max-h-96 overflow-y-auto pr-2"></div>
+            </div>
+            <div class="bg-slate-50 px-6 py-4 flex justify-end items-center rounded-b-xl">
+                <button type="button" id="close-history-btn" class="px-5 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition text-sm font-semibold">關閉</button>
+            </div>
+        </div>
+    </div>
+
+   
+     <div id="app-container" class="hidden opacity-0 transition-opacity duration-500">
+      <datalist id="assignee-list"></datalist>
+      <div class="container mx-auto p-4 sm:p-6 lg:p-8 max-w-5xl">
+            <header class="text-center mb-8">
+                <div class="flex justify-between items-center mb-6">
+                    <div class="flex-1"></div>
+  
+                  <div class="flex items-center space-x-4">
+                        <button class="google-login-btn guest-only flex items-center px-4 py-2 rounded-lg text-gray-700 font-medium hover:shadow-lg transition-all duration-300" onclick="authManager.signInWithGoogle()">
+               
+                             <svg class="w-5 h-5 mr-2" viewBox="0 0 24 24">
+                                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                            </svg>
+                            使用 Google 登入
+                        </button>
+                
+                
+                        <div class="user-info auth-required flex items-center space-x-3" style="display: none;">
+                            </div>
+                        <button class="logout-btn auth-required px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors" onclick="authManager.signOut()" style="display: none;">
+                            登出
+              
+                         </button>
+                    </div>
+                </div>
+                <h1 class="text-4xl sm:text-5xl font-bold text-slate-900 tracking-tight">工作任務追蹤平台</h1>
+                <p class="text-slate-500 mt-3 max-w-lg mx-auto">您的專屬任務管理中心，讓工作流程更順暢。</p>
+             
+                <div class="mt-6 max-w-xs mx-auto">
+                    <label for="view-switcher" class="block text-sm font-medium text-slate-700 mb-1">檢視模式</label>
+                    <select id="view-switcher" class="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition shadow-sm"></select>
+               
+                 </div>
+                <div id="offline-status" class="hidden mt-4 text-sm font-semibold text-amber-800 bg-amber-100 p-3 rounded-lg items-center justify-center max-w-md mx-auto shadow-sm border border-amber-200"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0v4a1 1 0 112 0V6zM12 14a1 1 0 10-2 0v-1a1 1 0 102 0v1z" clip-rule="evenodd"></path></svg><span id="offline-message"></span></div>
+            </header>
+            
+   
+                 <div class="flex justify-center space-x-2 mb-8">
+                 <button id="import-btn-main" class="flex items-center px-4 py-2 text-sm font-semibold text-slate-700 bg-white border border-slate-300 rounded-md hover:bg-slate-50 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>貼上內容匯入</button>
+            </div>
+
+          
+             <div class="bg-white p-6 md:p-8 rounded-xl shadow-lg border border-slate-200/50 mb-10">
+                <h2 class="text-xl font-semibold mb-6 text-slate-800">新增一項任務</h2>
+                <form id="add-task-form" class="space-y-5">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div>
+    
+                           <label for="add-task-priority" class="block text-sm font-medium text-slate-600 mb-1.5">優先度</label>
+                           <select id="add-task-priority" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition"></select>
+                        </div>
+       
+                         <div>
+                            <label for="add-task-assignee" class="block text-sm font-medium text-slate-600 mb-1.5">負責人</label>
+                            <div class="relative flex items-center">
+                  
+                              <input type="text" id="add-task-assignee" list="assignee-list" placeholder="輸入或選擇..." class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition pr-10">
+                                <div class="absolute right-0 flex items-center pr-2">
+                                
+                                    <button type="button" id="voice-input-btn-assignee" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="語音輸入負責人">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm5 2a1 1 0 11-2 0V4a1 1 0 112 0v2zm-4 4a1 1 0 00-1 1v1a1 1 0 102 0v-1a1 1 0 00-1-1z" clip-rule="evenodd" /><path d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" /></svg>
+                                    </button>
+                                </div>
+                         
+                           </div>
+                        </div>
+                        <div>
+                            <label for="add-task-department" class="block text-sm font-medium text-slate-600 mb-1.5">所屬部門</label>
+               
+                             <select id="add-task-department" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition" required></select>
+                        </div>
+                         <div>
+                        
+                            <label for="add-task-due-date" class="block text-sm font-medium text-slate-600 mb-1.5">截止日期 (可選)</label>
+                            <input type="date" id="add-task-due-date" class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition">
+                        </div>
+                    </div>
+   
+                         <div>
+                        <label for="add-task-title" class="block text-sm font-medium text-slate-600 mb-1.5">任務標題</label>
+                        <div class="relative flex items-center">
+                          
+                          <input type="text" id="add-task-title" placeholder="請輸入任務標題..." class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition pr-28" required>
+                             <div class="absolute right-0 flex items-center space-x-1 pr-2">
+                                <button type="button" id="ai-generate-desc-btn" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="AI 產生任務描述"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg></button>
+                                <button type="button" id="paste-btn-title" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="貼上"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg></button>
+                                <button type="button" id="voice-input-btn-title" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="語音輸入"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm5 2a1 1 0 11-2 0V4a1 1 0 112 0v2zm-4 4a1 1 0 00-1 1v1a1 1 0 102 0v-1a1 1 0 00-1-1z" clip-rule="evenodd" /><path d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" /></svg></button>
+                            </div>
+                        </div>
+                    </div>
+
+          
+                    <div class="flex justify-center items-center">
+                        <button type="button" id="copy-title-desc-btn" class="p-2 text-slate-400 hover:text-indigo-600 rounded-full bg-slate-100 hover:bg-slate-200 transition" title="複製標題至描述">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+               
+                                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                            </svg>
+                        </button>
+                    </div>
+
+   
+                         <div>
+                        <label for="add-task-desc" class="block text-sm font-medium text-slate-600 mb-1.5">任務描述 (可選)</label>
+                        <div class="relative">
+                           
+                         <textarea id="add-task-desc" rows="3" placeholder="請輸入任務描述..." class="custom-input w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-300 focus:border-indigo-400 transition pr-24"></textarea>
+                            <div class="absolute top-2 right-2 flex items-center space-x-1">
+                               <button type="button" id="ai-summarize-btn" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition cursor-not-allowed" title="AI 產生任務標題" disabled><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.707 4.293a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-5-5a1 1 0 111.414-1.414L10 8.586l4.293-4.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg></button>
+                               <button type="button" id="paste-btn-desc" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="貼上"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg></button>
+                               <button type="button" id="voice-input-btn-desc" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="語音輸入"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm5 2a1 1 0 11-2 0V4a1 1 0 112 0v2zm-4 4a1 1 0 00-1 1v1a1 1 0 102 0v-1a1 1 0 00-1-1z" clip-rule="evenodd" /><path d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" /></svg></button>
+                               <button type="button" id="image-input-btn" class="p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="圖片輸入"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd" /></svg></button>
+                          
+                             </div>
+                        </div>
+                        <input type="file" id="image-input-file" class="hidden" accept="image/*">
+                        <div id="image-preview-container" class="mt-2"></div>
+                    
+                    </div>
+                     <p id="status-message" class="text-sm text-center text-slate-500 h-5"></p>
+                    <button type="submit" class="w-full btn-primary text-white font-semibold py-3 px-4 rounded-lg focus:outline-none focus:ring-4 focus:ring-indigo-300/80">新增任務</button>
+                </form>
+            </div>
+
+            <div id="department-tabs-wrapper" class="mb-6">
+ 
+               <div class="hidden sm:block">
+                    <div class="border-b border-slate-200">
+                        <nav id="department-tabs" class="-mb-px flex items-center" aria-label="Tabs"></nav>
+                    </div>
+            
+                </div>
+                 <div class="sm:hidden">
+                    <label for="tabs-select" class="sr-only">選擇部門</label>
+                    <select id="tabs-select" class="block w-full rounded-md border-slate-300 focus:border-indigo-500 focus:ring-indigo-500"></select>
+                </div>
+            </div>
+
+ 
+            <div class="mb-6">
+                <div class="relative">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <svg class="w-5 h-5 text-slate-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                    </div>
+                    <input type="search" id="search-input" placeholder="在目前檢視中搜尋標題或描述..." class="custom-input w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition">
+                </div>
+            </div>
+
+            
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div class="space-y-2">
+                    <div class="flex justify-between items-center px-2">
+                        <h2 class="text-2xl font-bold text-slate-800 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2.5 text-amber-500" viewBox="0 0 20 20" fill="currentColor"><path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z" /><path fill-rule="evenodd" d="M4 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h4a1 1 0 100-2H7zm0 4a1 1 0 100 2h4a1 1 0 100-2H7z" clip-rule="evenodd" /></svg>待辦事項</h2>
+                        <div id="sort-controls" class="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg">
+                             <button data-sort="priority" class="sort-btn px-3 py-1 text-sm font-semibold rounded-md transition-colors">優先度</button>
+   
+                               <button data-sort="createdAt" class="sort-btn px-3 py-1 text-sm font-semibold rounded-md transition-colors text-slate-500">建立日期</button>
+                             <button data-sort="dueDate" class="sort-btn px-3 py-1 text-sm font-semibold rounded-md transition-colors text-slate-500">到期日期</button>
+                        </div>
+   
+                         </div>
+                    <div id="todo-list" class="space-y-4 min-h-[150px]"></div>
+                </div>
+                <div class="space-y-2">
+                     <div class="flex justify-between items-center px-2">
+  
+                      <h2 class="text-2xl font-bold text-slate-800 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2.5 text-emerald-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>已處理</h2>
+                        <button id="clear-completed-btn" class="text-sm text-rose-600 hover:text-rose-800 font-semibold transition-colors flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>清除</button>
+                    </div>
+                    <div id="completed-list" class="space-y-4"></div>
+       
+                 </div>
+            </div>
+             <div id="trash-section" class="mt-12">
+                <button id="toggle-trash-btn" class="w-full flex justify-between items-center p-4 bg-white rounded-lg shadow-sm border text-left">
+                    <span class="font-semibold text-slate-700 flex items-center"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>垃圾桶</span>
+                    <svg id="trash-arrow" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-500 transition-transform" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+      
+                   </button>
+                <div id="trash-container" class="mt-2 p-4 bg-slate-50/50 rounded-lg">
+                    <div id="trash-list" class="space-y-4"></div>
+                </div>
+            </div>
+      </div>
+    </div>
+    
+    <div id="undo-bar" class="fixed bottom-5 left-1/2 -translate-x-1/2 w-auto bg-slate-800 text-white py-3 px-6 rounded-full shadow-lg flex items-center justify-center z-[100]">
+        <span id="undo-message" class="text-sm"></span>
+        <button id="undo-btn" class="ml-4 text-sm font-semibold text-indigo-300 hover:text-indigo-200">復原</button>
+    </div>
+<script>
+  const authManager = {
+    signInWithGoogle: () => console.error("authManager.signInWithGoogle not initialized"),
+    signOut: () => console.error("authManager.signOut not initialized"),
+  };
+</script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, where, getDocs, serverTimestamp, enableIndexedDbPersistence, writeBatch, Timestamp, orderBy, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        document.addEventListener('DOMContentLoaded', () => {
+            
+            const STATUSES = { TODO: "待辦事項", HOLD: "暫緩中", COMPLETED: "已完成", DELETED: "已刪除" };
+            const PRIORITIES = { '緊急': 4, '高': 3, '中': 2, '低': 1 };
+         
+            
+            const MANAGER_VIEW = '__ALL_VIEWS__';
+            const ALL_TASKS_TAB = '__ALL_TABS__';
+            
+            let state = {
+                db: null, auth: null, departments: [], localTasksCache: new Map(),
+                activeDepartmentTab: localStorage.getItem('activeDepartmentTab') || 
+                ALL_TASKS_TAB,
+                currentView: localStorage.getItem('currentView') || MANAGER_VIEW,
+                userName: '使用者',
+                currentEditingTaskId: null, currentImageBase64: null, activeRecognitionTarget: null,
+                currentSortOrder: 'priority',
+                statusChangeContext: null,
+         
+                lastImportIds: null, 
+                undoTimeout: null,
+                lineAutoRemindConfig: JSON.parse(localStorage.getItem('lineAutoRemindConfig') || '{"enabled": false, "time": "09:00", "recipientType": "group", "recipientId": ""}'),
+            };
+            let unsubscribeTasks, unsubscribeDepartments;
+            let recognition;
+
+            const dom = {
+                loadingOverlay: document.getElementById('loading-overlay'),
+                welcomeOverlay: document.getElementById('welcome-overlay'),
+                appContainer: document.getElementById('app-container'),
+                viewSwitcher: document.getElementById('view-switcher'),
+                offlineStatus: document.getElementById('offline-status'),
+       
+                 offlineMessage: document.getElementById('offline-message'),
+                addTaskForm: document.getElementById('add-task-form'),
+                addTaskDepartment: document.getElementById('add-task-department'),
+                addTaskPriority: document.getElementById('add-task-priority'),
+                addTaskAssignee: document.getElementById('add-task-assignee'),
+                addTaskTitle: document.getElementById('add-task-title'),
+     
+                   addTaskDesc: document.getElementById('add-task-desc'),
+                addTaskDueDate: document.getElementById('add-task-due-date'),
+                todoList: document.getElementById('todo-list'),
+                completedList: document.getElementById('completed-list'),
+                clearCompletedBtn: document.getElementById('clear-completed-btn'),
+                departmentTabsWrapper: document.getElementById('department-tabs-wrapper'),
+   
+                     departmentTabsContainer: document.getElementById('department-tabs'),
+                tabsSelect: document.getElementById('tabs-select'),
+                editModalOverlay: document.getElementById('edit-modal-overlay'),
+                editTaskForm: document.getElementById('edit-task-form'),
+                editTaskDepartment: document.getElementById('edit-task-department'),
+                editDepartmentNameBtn: document.getElementById('edit-department-name-btn'),
+ 
+                               editTaskPriority: document.getElementById('edit-task-priority'),
+                editTaskAssignee: document.getElementById('edit-task-assignee'),
+                editTaskDueDate: document.getElementById('edit-task-due-date'),
+                editTaskTitle: document.getElementById('edit-task-title'),
+                editTaskDesc: document.getElementById('edit-task-desc'),
+                
+                editTaskCopyCheckbox: document.getElementById('edit-task-copy-checkbox'),
+                cancelEditBtn: document.getElementById('cancel-edit-btn'),
+                aiSummarizeBtn: document.getElementById('ai-summarize-btn'),
+                voiceInputBtnTitle: document.getElementById('voice-input-btn-title'),
+                voiceInputBtnDesc: document.getElementById('voice-input-btn-desc'),
+                voiceInputBtnAssignee: document.getElementById('voice-input-btn-assignee'),
+              
+                  imageInputBtn: document.getElementById('image-input-btn'),
+                imageFileInput: document.getElementById('image-input-file'),
+                imagePreviewContainer: document.getElementById('image-preview-container'),
+                statusMessage: document.getElementById('status-message'),
+                pasteBtnTitle: document.getElementById('paste-btn-title'),
+                pasteBtnDesc: document.getElementById('paste-btn-desc'),
+            
+                searchInput: document.getElementById('search-input'),
+                aiGenerateDescBtn: document.getElementById('ai-generate-desc-btn'),
+                importBtnMain: document.getElementById('import-btn-main'),
+                sortControls: document.getElementById('sort-controls'),
+                copyTitleToDescBtn: document.getElementById('copy-title-desc-btn'),
+                assigneeDatalist: document.getElementById('assignee-list'),
+          
+                  importModal: document.getElementById('import-modal-overlay'),
+                importTextarea: document.getElementById('import-textarea'),
+                importTaskDepartment: document.getElementById('import-task-department'),
+                cancelImportBtn: document.getElementById('cancel-import-btn'),
+                confirmImportBtn: document.getElementById('confirm-import-btn'),
+                addDepartmentFromImportBtn: document.getElementById('add-department-from-import-btn'),
+        
+                 importStatusMessage: document.getElementById('import-status-message'),
+                statusReasonModal: document.getElementById('status-reason-modal-overlay'),
+                statusReasonForm: document.getElementById('status-reason-form'),
+                statusReasonInput: document.getElementById('status-reason-input'),
+                newStatusLabel: document.getElementById('new-status-label'),
+                cancelStatusReasonBtn: document.getElementById('cancel-status-reason-btn'),
+      
+                  historyModal: document.getElementById('history-modal-overlay'),
+                historyList: document.getElementById('history-list'),
+                closeHistoryBtn: document.getElementById('close-history-btn'),
+                trashSection: document.getElementById('trash-section'),
+                toggleTrashBtn: document.getElementById('toggle-trash-btn'),
+                trashContainer: document.getElementById('trash-container'),
+    
+                    trashArrow: document.getElementById('trash-arrow'),
+                trashList: document.getElementById('trash-list'),
+                undoBar: document.getElementById('undo-bar'),
+                undoMessage: document.getElementById('undo-message'),
+                undoBtn: document.getElementById('undo-btn'),
+                dueTasksModal: document.getElementById('due-tasks-modal-overlay'),
+  
+                              dueTasksList: document.getElementById('due-tasks-list'),
+                closeDueTasksBtn: document.getElementById('close-due-tasks-btn'),
+                copyAllRemindersBtn: document.getElementById('copy-all-reminders-btn'),
+                dueTasksStatusMsg: document.getElementById('due-tasks-status-msg'),
+                lineAutoRemindModal: document.getElementById('line-auto-remind-modal-overlay'),
+                lineAutoRemindSettingsBtn: document.getElementById('line-auto-remind-settings-btn'),
+                enableLineAutoRemind: document.getElementById('enable-line-auto-remind'),
+                lineRemindTime: document.getElementById('line-remind-time'),
+                lineRecipientType: document.getElementById('line-recipient-type'),
+                lineRecipientId: document.getElementById('line-recipient-id'),
+                testLineSendBtn: document.getElementById('test-line-send-btn'),
+                saveLineAutoRemindBtn: document.getElementById('save-line-auto-remind-btn'),
+                closeLineAutoRemindBtn: document.getElementById('close-line-auto-remind-btn'),
+            };
+            function startApp() {
+    if (!firebaseConfig.apiKey.startsWith("AIza")) {
+        showError("您尚未設定 Firebase！");
+        return;
+    }
+    const app = initializeApp(firebaseConfig);
+    state.auth = getAuth(app);
+    state.db = getFirestore(app);
+    enableIndexedDbPersistence(state.db).catch(err => console.warn("Firebase Persistence Error:", err.message));
+
+    onAuthStateChanged(state.auth, async user => {
+        if (user && !user.isAnonymous) { // 確認是真人使用者
+    state.userName = user.displayName || '使用者';
+
+    const userInfoContainer = document.querySelector('.user-info');
+    if (user.photoURL) {
+        userInfoContainer.innerHTML = `<img src="${user.photoURL}" alt="User Avatar" class="w-8 h-8 rounded-full shadow-sm"><span class="font-semibold text-slate-700">${user.displayName}</span>`;
+    } else {
+        userInfoContainer.innerHTML = `<span class="font-semibold text-slate-700">${user.displayName}</span>`;
+    }
+
+    // --- 在這裡開始貼上/加入 ---
+    // 取得使用者角色
+    const userDocRef = doc(state.db, "users", user.uid);
+    const userDocSnap = await getDoc(userDocRef);
+
+    if (userDocSnap.exists() && userDocSnap.data().role === 'admin') {
+        state.userRole = 'admin';
+        console.log("使用者角色：Admin");
+    } else {
+        state.userRole = 'member';
+        console.log("使用者角色：Member");
+
+        // 如果使用者文件不存在，可以順便幫他建立一個
+        if (!userDocSnap.exists()) {
+            await setDoc(userDocRef, {
+                displayName: user.displayName,
+                email: user.email,
+                role: 'member'
+            });
+        }
+    }
+
+            bootstrapMainApp();
+        } else {
+            state.userName = '訪客';
+
+            document.querySelector('.guest-only').style.display = 'flex';
+            document.querySelectorAll('.auth-required').forEach(el => el.style.display = 'none');
+
+            dom.loadingOverlay.style.display = 'flex';
+            document.querySelector('#loading-overlay .spinner').style.display = 'none';
+
+            dom.appContainer.classList.add('hidden');
+            dom.appContainer.classList.remove('opacity-100');
+
+            if(unsubscribeTasks) unsubscribeTasks();
+            if(unsubscribeDepartments) unsubscribeDepartments();
+
+            console.log("使用者未登入，請登入以使用應用程式。");
+        }
+    });
+}
+            
+// --- NEW: Authentication function implementations ---
+authManager.signInWithGoogle = () => {
+    const provider = new GoogleAuthProvider();
+    const spinner = document.querySelector('#loading-overlay .spinner');
+    const loginBtn = document.querySelector('#loading-overlay .google-login-btn');
+    spinner.style.display = 'block';
+    loginBtn.style.display = 'none';
+
+    signInWithPopup(state.auth, provider)
+        .then((result) => {
+            console.log("Google 登入成功:", result.user);
+        })
+        .catch((error) => {
+            console.error("Google 登入失敗:", error);
+            showError(`Google 登入失敗: ${error.message}`);
+            spinner.style.display = 'none';
+            loginBtn.style.display = 'flex';
+        });
+};
+
+authManager.signOut = () => {
+    signOut(state.auth).catch((error) => {
+        console.error("登出失敗:", error);
+    });
+};
+window.authManager = authManager;
+
+            function bootstrapMainApp() { 
+    dom.loadingOverlay.style.display = 'none';
+    dom.welcomeOverlay.classList.add('visible'); 
+    populateSelects(); 
+    
+    setTimeout(() => { 
+        dom.welcomeOverlay.classList.remove('visible'); 
+        
+        showMainApp(); // <-- 這是我之前遺漏的、最關鍵的一行！
+
+        listenForDepartments(); 
+        listenForTasks(() => {
+            checkAndShowDueTasks();
+         });
+        initializeDragAndDrop(); 
+        initializeDepartmentDragAndDrop();
+        bindEventListeners();
+        updateSortButtonsUI(); 
+   }, 2000);
+}
+
+            function showMainApp() {
+                dom.appContainer.classList.remove('hidden');
+                dom.appContainer.classList.add('opacity-100'); 
+            }
+
+            function checkAndShowDueTasks() {
+                const { overdue, dueToday } = getDueAndOverdueTasks();
+                const allDueTasks = [...overdue, ...dueToday];
+
+                if (allDueTasks.length === 0) {
+                    showMainApp();
+                    return;
+                }
+
+                dom.dueTasksList.innerHTML = '';
+                const createListItem = (task, isOverdue) => {
+                    const statusText = isOverdue ?
+                    '已過期' : '今天到期';
+                    const textColor = isOverdue ? 'text-red-600' : 'text-amber-600';
+                    const borderColor = isOverdue ? 'border-red-500' : 'border-amber-500';
+                    return `
+                        <div class="due-task-item flex justify-between items-center p-3 bg-slate-50 rounded-lg border-l-4 ${borderColor}" data-task-id="${task.id}">
+                            <div class="task-link flex-grow cursor-pointer pr-2">
+                                <p 
+                                class="font-semibold text-slate-800">${task.title}</p>
+                                <p class="text-xs text-slate-500 mt-1">
+                                    <span class="font-bold ${textColor}">${statusText}</span> |
+                                    負責人: ${task.assignee || '未指派'}
+                                </p>
+                            </div>
+                            <div class="flex-shrink-0 flex items-center space-x-2">
+     
+                                   <button title="透過 Email 催辦" class="remind-via-email-btn p-2 rounded-full hover:bg-slate-200 transition"><svg class="w-5 h-5 text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" /><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" /></svg></button>
+                                <button 
+                                title="複製 LINE 提醒訊息" class="remind-via-line-btn p-2 rounded-full hover:bg-slate-200 transition"><svg class="w-5 h-5 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm4.74 11.6c-.24.59-1.39.8-1.63.83s-.45.09-.65.04c-.2-.04-.52-.22-.98-.44-.46-.22-1.6-1-3.47-2.65C4.22 8.23 3.4 6.9 3.32 6.81c-.09-.1-.24-.16-.24-.41s.14-.41.28-.55c.14-.14.3-.18.4-.18h.11c.14 0 .28.05.41.28s.32.74.37.84c.05.1.05.24 0 .37-.04.14-.13.23-.26.36s-.26.24-.35.3c-.09.07-.16.14-.14.24.02.1.22.46.73.97s1.1 1.25 1.18 1.33c.09.09.18.1.28.04.1-.05.28-.18.38-.28s.18-.2.26-.2.2 0 .3.05c.1.04.6.3 1.05.7.45.4.75.7.83.8.09.1.1.24.04.37-.05.14-.41.68-.65.92z"/></svg></button>
+                            </div>
+                        </div>
+    
+                    `;
+                };
+                if (overdue.length > 0) {
+                    dom.dueTasksList.innerHTML += `<h3 class="text-sm font-bold text-slate-600 mb-2 mt-1">已過期任務 (${overdue.length})</h3>`;
+                    overdue.forEach(task => dom.dueTasksList.innerHTML += createListItem(task, true));
+                }
+                
+                if (dueToday.length > 0) {
+                    dom.dueTasksList.innerHTML += `<h3 class="text-sm font-bold text-slate-600 mb-2 mt-4">今日到期任務 (${dueToday.length})</h3>`;
+                    dueToday.forEach(task => dom.dueTasksList.innerHTML += createListItem(task, false));
+                }
+
+                dom.dueTasksModal.classList.remove('hidden');
+                dom.dueTasksModal.classList.add('flex');
+            }
+
+            function getDueAndOverdueTasks() {
+                const allTasks = Array.from(state.localTasksCache.values());
+                const activeTasks = allTasks.filter(t => t.dueDate && t.status !== STATUSES.COMPLETED && t.status !== STATUSES.DELETED);
+
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                const overdue = [];
+                const dueToday = [];
+                activeTasks.forEach(task => {
+                    const dueDate = new Date(task.dueDate);
+                    dueDate.setHours(0, 0, 0, 0);
+
+                    if (dueDate < today) {
+                        overdue.push(task);
+   
+                     } else if (dueDate.getTime() === today.getTime()) {
+                        dueToday.push(task);
+                    }
+                });
+                return { overdue, dueToday };
+            }
+
+            function focusOnTask(taskId) {
+                const taskData = state.localTasksCache.get(taskId);
+                if (!taskData) return;
+
+                if (state.activeDepartmentTab !== ALL_TASKS_TAB && state.activeDepartmentTab !== taskData.category) {
+                    updateActiveTab(taskData.category);
+                }
+
+                setTimeout(() => {
+                    const taskCard = document.querySelector(`.task-card[data-id="${taskId}"]`);
+                    if (taskCard) {
+                        taskCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+                        taskCard.classList.add('expanded');
+                        taskCard.classList.add('task-highlight');
+                        setTimeout(() => taskCard.classList.remove('task-highlight'), 2000);
+                    }
+             
+                   }, 100); 
+            }
+            
+            function getDueDateColorClass(task) {
+                if (task.status === STATUSES.COMPLETED) {
+                    return 'border-slate-300';
+                }
+                if (!task.dueDate) {
+                    return 'border-green-500';
+                }
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const dueDate = new Date(task.dueDate);
+                dueDate.setHours(0, 0, 0, 0);
+                const oneWeekFromNow = new Date(today);
+                oneWeekFromNow.setDate(today.getDate() + 7);
+                if (dueDate < today) {
+                    return 'border-red-500';
+                } else if (dueDate <= oneWeekFromNow) {
+                    return 'border-blue-500';
+                } else {
+                    return 'border-green-500';
+                }
+            }
+
+            function populateSelects() { const priorityOptions = Object.keys(PRIORITIES).map(p => `<option value="${p}">${p}</option>`).join('');
+                [dom.addTaskPriority, dom.editTaskPriority].forEach(sel => sel.innerHTML = priorityOptions); }
+            
+            function initializeDragAndDrop() { 
+                new Sortable(dom.todoList, { 
+                    animation: 150, 
+                    ghostClass: 'sortable-ghost', 
+    
+                    onEnd: async (evt) => { 
+                        if (state.currentSortOrder !== 'priority') { 
+                            state.currentSortOrder = 'priority'; 
+                   
+                            updateSortButtonsUI(); 
+                        } 
+                        const taskElements = dom.todoList.querySelectorAll('.task-card'); 
+                        const batch = writeBatch(state.db); 
+         
+                       taskElements.forEach((el, index) => { 
+                            const taskId = el.dataset.id; 
+                            if(taskId) { 
+                   
+                             const taskRef = doc(state.db, 'tasks', taskId); 
+                                batch.update(taskRef, { order: index }); 
+                            } 
+               
+                         });
+                        try { 
+                            await batch.commit();
+                        } catch (error) { 
+                            console.error("更新任務順序失敗:", error);
+                        } 
+                    }, 
+                });
+            }
+
+            function initializeDepartmentDragAndDrop() {
+                new Sortable(dom.departmentTabsContainer, {
+                    animation: 150,
+                    filter: '#add-department-btn',
+                    onEnd: async (evt) => {
+  
+                       const tabs = dom.departmentTabsContainer.querySelectorAll('.category-tab a[data-department-id]');
+                        const batch = writeBatch(state.db);
+                        tabs.forEach((tab, index) => {
+                    
+                        const deptId = tab.dataset.departmentId;
+                            if (deptId) {
+                                const deptRef = doc(state.db, 'categories', deptId);
+                      
+                                batch.update(deptRef, { order: index + 1 }); // Start order from 1 for default tab
+                            }
+                        });
+                        
+                        try {
+                            await batch.commit();
+                        } catch (error) {
+                            console.error("更新部門順序失敗:", error);
+                        }
+                    }
+                });
+            }
+
+            function highlightText(text, searchTerm) { if (!searchTerm || !text) return text;
+                const regex = new RegExp(`(${searchTerm.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi'); return text.replace(regex, `<mark>$1</mark>`);
+            }
+
+            function listenForDepartments() { 
+                const departmentsCollection = collection(state.db, 'categories');
+                if(unsubscribeDepartments) unsubscribeDepartments(); 
+                unsubscribeDepartments = onSnapshot(query(departmentsCollection, orderBy("order")), (snapshot) => { 
+                    if (snapshot.empty) { 
+                        const defaultDepts = ["董總交辦", "行政管理", "運籌管理", "有機植萃", "品質管理"]; 
+                        const batch = writeBatch(state.db); 
+        
+                        defaultDepts.forEach((name, index) => { 
+                            const docRef = doc(collection(state.db, "categories")); 
+                            batch.set(docRef, { name, order: index }); 
+             
+                           }); 
+                        batch.commit(); 
+                        return; 
+                    } 
+                 
+                   state.departments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); 
+                    const departmentNames = state.departments.map(c => c.name); 
+                    if (state.activeDepartmentTab !== ALL_TASKS_TAB && !departmentNames.includes(state.activeDepartmentTab)) { 
+                        state.activeDepartmentTab = ALL_TASKS_TAB;
+                        localStorage.setItem('activeDepartmentTab', state.activeDepartmentTab);
+                    }
+                    if (state.currentView !== MANAGER_VIEW && !departmentNames.includes(state.currentView)) {
+                        handleViewChange(MANAGER_VIEW);
+                    }
+                    renderDepartmentsAndViewsUI();
+                    renderTasksAndTrash(); 
+                }); 
+            }
+            
+            function listenForTasks(callback) { 
+                const tasksQuery = query(collection(state.db, 'tasks'), where("creatorUid", "==", state.auth.currentUser.uid));
+                if (unsubscribeTasks) unsubscribeTasks(); 
+                let isFirstLoad = true;
+                unsubscribeTasks = onSnapshot(tasksQuery, (snapshot) => { 
+                    const currentlyExpanded = new Set();
+                    document.querySelectorAll('.task-card.expanded').forEach(card => currentlyExpanded.add(card.dataset.id));
+
+                    const allAssignees = new Set();
+                 
+                   snapshot.docChanges().forEach((change) => { 
+                        const taskData = { status: STATUSES.TODO, ...change.doc.data(), id: change.doc.id }; 
+                        if (taskData.assignee && taskData.assignee !== '未指派') {
+                            allAssignees.add(taskData.assignee);
+  
+                       }
+                        if (change.type === "added" || change.type === "modified") { 
+                            state.localTasksCache.set(taskData.id, taskData); 
+               
+                         } if (change.type === "removed") { 
+                            state.localTasksCache.delete(change.doc.id); 
+                        } 
+                    });
+                    renderAssigneeDatalist(allAssignees);
+                    renderTasksAndTrash(); 
+
+                    currentlyExpanded.forEach(id => {
+                        const card = document.querySelector(`.task-card[data-id="${id}"]`);
+                        if(card) card.classList.add('expanded');
+                    });
+                    if (isFirstLoad && callback) {
+                        callback();
+                        isFirstLoad = false;
+                    }
+
+                }, (error) => { console.error("監聽任務時發生錯誤:", error);
+                    showError("無法讀取雲端資料。"); }); 
+            }
+            
+            function renderDepartmentsAndViewsUI() {
+                renderViewSwitcher();
+                renderDepartmentTabs();
+                renderAllDepartmentSelects();
+            }
+
+            function renderViewSwitcher() {
+                const options = state.departments.map(dept => `<option value="${dept.name}">${dept.name} 檢視</option>`).join('');
+                dom.viewSwitcher.innerHTML = `<option value="${MANAGER_VIEW}">主管模式 (所有部門)</option>${options}`;
+                dom.viewSwitcher.value = state.currentView;
+            }
+            
+            function renderDepartmentTabs() { 
+                if (state.currentView !== MANAGER_VIEW) {
+                    dom.departmentTabsWrapper.style.display = 'none';
+                    return;
+                }
+                dom.departmentTabsWrapper.style.display = 'block';
+                const container = dom.departmentTabsContainer; 
+                container.innerHTML = ''; 
+                const allTasks = Array.from(state.localTasksCache.values());
+                const todoCounts = allTasks.reduce((acc, task) => { 
+                    if (task.status !== STATUSES.COMPLETED && task.status !== STATUSES.DELETED) { 
+                        acc[task.category] = (acc[task.category] || 0) + 1; 
+                    } 
+            
+                    return acc; 
+                }, {});
+                const totalTodoCount = Object.values(todoCounts).reduce((sum, count) => sum + count, 0);
+                const createTab = (name, id, isAllTab = false) => { 
+                    const count = isAllTab ?
+                    totalTodoCount : (todoCounts[name] || 0); 
+                    const departmentValue = isAllTab ? ALL_TASKS_TAB : name; 
+                    const isActive = state.activeDepartmentTab === departmentValue;
+                    const tabWrapper = document.createElement('div'); 
+                    tabWrapper.className = `category-tab relative flex items-center pr-2 rounded-md transition-colors duration-200 ${isActive ? 'tab-active' : 'tab-inactive'}`;
+                    const tabLink = document.createElement('a'); 
+                    tabLink.href = '#'; 
+                    tabLink.dataset.department = departmentValue;
+                    if (!isAllTab) { 
+                        tabLink.dataset.departmentId = id;
+                        tabWrapper.innerHTML += `<button data-department-name="${name}" class="export-category-btn p-1 text-slate-400 hover:text-indigo-600"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg></button>` 
+                    } 
+                    tabLink.className = `flex-grow pl-4 pr-2 py-2 text-sm font-semibold`;
+                    tabLink.innerHTML = `<span>${name}</span> <span class="ml-2 px-2 py-0.5 text-xs font-medium rounded-full ${isActive ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-200 text-slate-600'}">${count}</span>`; 
+                    tabWrapper.prepend(tabLink);
+                    if (!isAllTab) { 
+                        const removeButton = document.createElement('button');
+                        removeButton.className = 'remove-category-btn p-1 rounded-full hover:bg-red-200 hover:text-red-700 text-slate-400'; 
+                        removeButton.innerHTML = `<svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>`;
+                        removeButton.title = `移除部門 "${name}"`; 
+                        removeButton.dataset.departmentId = id; 
+                        removeButton.dataset.departmentName = name; 
+                        tabWrapper.appendChild(removeButton);
+                    } 
+                    container.appendChild(tabWrapper);
+                }; 
+                
+                createTab('所有任務', null, true); 
+                state.departments.forEach(cat => createTab(cat.name, cat.id)); 
+                
+                const addDepartmentButton = document.createElement('button'); 
+                addDepartmentButton.id = 'add-department-btn';
+                addDepartmentButton.className = "ml-2 px-3 py-1.5 text-sm font-semibold text-indigo-600 hover:bg-indigo-100 rounded-md transition-colors duration-200"; 
+                addDepartmentButton.textContent = "+ 新增"; 
+                container.appendChild(addDepartmentButton);
+                dom.tabsSelect.innerHTML = `<option value="${ALL_TASKS_TAB}">所有任務</option>` + state.departments.map(cat => `<option value="${cat.name}">${cat.name}</option>`).join('');
+                dom.tabsSelect.value = state.activeDepartmentTab;
+            }
+            
+            function renderAllDepartmentSelects() {
+                const { departments, activeDepartmentTab } = state;
+                const selectOptionsHTML = departments.map(cat => `<option value="${cat.name}">${cat.name}</option>`).join('');
+
+                [dom.addTaskDepartment, dom.editTaskDepartment].forEach(select => {
+                    if (select) {
+                        const currentVal = select.value;
+                        select.innerHTML = selectOptionsHTML;
+               
+                         if (departments.some(c => c.name === currentVal)) {
+                            select.value = currentVal;
+                        } else if (activeDepartmentTab !== ALL_TASKS_TAB) {
+                         
+                           select.value = activeDepartmentTab;
+                        }
+                    }
+                });
+                if(dom.importTaskDepartment) {
+                    const currentVal = dom.importTaskDepartment.value;
+                    dom.importTaskDepartment.innerHTML = '<option value="__AUTO__">自動 (依檔案設定)</option>' + selectOptionsHTML;
+                    if (departments.some(c => c.name === currentVal)) {
+                       dom.importTaskDepartment.value = currentVal;
+                    }
+                }
+            }
+
+            function renderAssigneeDatalist(assignees) { dom.assigneeDatalist.innerHTML = Array.from(assignees).map(name => `<option value="${name}"></option>`).join('');
+            }
+            
+            function renderTasksAndTrash() { 
+                const allTasks = Array.from(state.localTasksCache.values());
+                const tasksForCurrentView = (state.currentView === MANAGER_VIEW)
+                    ?
+                    allTasks
+                    : allTasks.filter(task => task.category === state.currentView);
+                const activeTasks = tasksForCurrentView.filter(t => t.status !== STATUSES.DELETED); 
+                const deletedTasks = tasksForCurrentView.filter(t => t.status === STATUSES.DELETED); 
+                renderTasks(activeTasks); 
+                renderTrash(deletedTasks);
+            }
+
+            function renderTasks(tasksToRender) { 
+                dom.todoList.innerHTML = '';
+                dom.completedList.innerHTML = ''; 
+                const searchTerm = dom.searchInput.value.toLowerCase(); 
+                
+                const baseTasks = (state.currentView === MANAGER_VIEW && state.activeDepartmentTab !== ALL_TASKS_TAB)
+                    ?
+                    tasksToRender.filter(task => task.category === state.activeDepartmentTab)
+                    : tasksToRender;
+                const tasksToDisplay = searchTerm 
+                    ?
+                    baseTasks.filter(task => (task.title || "").toLowerCase().includes(searchTerm) || (task.description || "").toLowerCase().includes(searchTerm)) 
+                    : baseTasks;
+                const sorters = { priority: (a, b) => (PRIORITIES[b.priority] || 0) - (PRIORITIES[a.priority] || 0) ||
+                    a.order - b.order, 
+                                 createdAt: (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0), 
+                                 dueDate: (a, b) => { const dateA = a.dueDate ?
+                    new Date(a.dueDate).getTime() : Infinity; 
+                                                     const dateB = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+                                                     if (dateA === Infinity && dateB === Infinity) return a.order - b.order; 
+                                                     return dateA - dateB; } };
+                const todoTasks = tasksToDisplay.filter(t => t.status === STATUSES.TODO || t.status === STATUSES.HOLD).sort(sorters[state.currentSortOrder]);
+                const processedTasks = tasksToDisplay.filter(t => t.status === STATUSES.COMPLETED).sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)); 
+                
+                todoTasks.forEach(task => dom.todoList.appendChild(createTaskElement(task)));
+                processedTasks.forEach(task => dom.completedList.appendChild(createTaskElement(task))); 
+                
+                if (todoTasks.length === 0) { 
+                    const message = searchTerm ?
+                    '找不到符合的待辦任務。' : (state.activeDepartmentTab === ALL_TASKS_TAB ? '所有待辦事項都已處理完畢！' : '這個部門的待辦事項都已處理完畢。');
+                    dom.todoList.innerHTML = `<div class="text-center p-8 bg-white rounded-xl border border-dashed border-slate-300 text-slate-500"><svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-12 w-12 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><h3 class="mt-4 text-lg font-semibold text-slate-700">太棒了！</h3><p class="mt-1 text-sm">${message}</p></div>`;
+                } 
+                if (processedTasks.length === 0) { 
+                    dom.completedList.innerHTML = `<p class="text-center text-sm text-slate-500 p-4">暫無已處理的項目</p>`;
+                } 
+            }
+
+            function renderTrash(deletedTasks) { 
+                dom.trashList.innerHTML = '';
+                if (deletedTasks.length === 0) { 
+                    dom.trashList.innerHTML = '<p class="text-center text-sm text-slate-500">垃圾桶是空的。</p>';
+                    return;
+                } 
+                deletedTasks.sort((a,b) => (b.updatedAt?.seconds || 0) - (a.updatedAt?.seconds || 0)).forEach(task => { 
+                    const card = document.createElement('div'); 
+                    card.className = 'bg-white p-3 rounded-md shadow-sm flex justify-between items-center'; 
+                  
+                   card.innerHTML = `<div><p class="font-semibold text-slate-700">${task.title}</p><p class="text-xs text-slate-400">刪除於: ${task.updatedAt ? new Date(task.updatedAt.seconds * 1000).toLocaleString() : '未知'}</p></div><div class="space-x-2"><button data-task-id="${task.id}" class="restore-btn text-sm font-semibold text-indigo-600 hover:text-indigo-800">還原</button><button data-task-id="${task.id}" class="perm-delete-btn text-sm font-semibold text-rose-600 hover:text-rose-800">永久刪除</button></div>`; 
+                    dom.trashList.appendChild(card); 
+                });
+            }
+
+            function renderProgressLog(task) {
+                let html = '<div class="progress-log-section mt-4 pt-3 border-t border-dashed border-slate-200">';
+                html += `
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="text-sm font-semibold text-slate-600">進度記錄：</h4>
+                        <button class="copy-progress-log-btn text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center" title="將所有進度記錄複製成LINE貼文">
+               
+                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
+                            複製
+            
+                             </button>
+                    </div>`;
+                if (task.progressLog && task.progressLog.length > 0) {
+                    html += '<ul class="space-y-2 pl-1 mb-3 text-sm">';
+                    task.progressLog.slice().reverse().forEach(log => {
+                        html += `
+                            <li class="bg-slate-50 p-2 rounded-md">
+                                <p class="text-slate-700 whitespace-pre-wrap">${log.content}</p>
+       
+                                 <p class="text-xs text-slate-400 text-right mt-1"> by ${log.user} at ${new Date(log.timestamp.seconds * 1000).toLocaleString('zh-TW')}</p>
+                            </li>`;
+                    });
+                    html += '</ul>';
+                } else {
+                     html += '<p class="text-xs text-slate-400 mb-3">尚無進度記錄。</p>';
+                }
+
+                if (task.status !== STATUSES.COMPLETED) {
+                    html += `
+                        <form class="add-progress-log-form mt-2 space-y-2">
+                            <textarea placeholder="新增進度說明..." class="custom-input 
+                            w-full text-sm px-3 py-1.5 border border-slate-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition"></textarea>
+                            <div class="flex items-center justify-end space-x-2">
+                                <button type="button" class="paste-progress-btn p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="貼上內容">
+                  
+                                   <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" /><path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" /></svg>
+                                </button>
+    
+                                     <button type="button" class="voice-input-btn-progress p-2 text-slate-400 hover:text-indigo-600 rounded-md transition" title="語音輸入進度">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm5 2a1 1 0 11-2 0V4a1 1 0 112 0v2zm-4 4a1 1 0 00-1 1v1a1 1 0 102 0v-1a1 1 0 00-1-1z" clip-rule="evenodd" /><path d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" /></svg>
+                                </button>
+                                <button type="submit" class="text-sm bg-indigo-600 text-white font-semibold py-1.5 px-4 rounded-md 
+                                hover:bg-indigo-700 transition flex-shrink-0">記錄</button>
+                            </div>
+                        </form>`;
+                }
+                html += '</div>';
+                return html;
+            }
+            
+            function createTaskElement(task) {
+                const card = document.createElement('div');
+                card.dataset.id = task.id;
+
+                const backgroundClass = (task.isFromCEO || task.category === '董總交辦') ? 'bg-red-100' : 'bg-white';
+                card.className = `task-card ${backgroundClass} p-4 rounded-lg shadow-sm border-l-4 ${getDueDateColorClass(task)} flex flex-col`;
+                if (task.status === STATUSES.COMPLETED) {
+                    card.classList.add('opacity-70');
+                }
+
+                const searchTerm = dom.searchInput.value;
+                const titleText = (task.title || '').trim() || '無標題任務';
+                const titleHTML = highlightText(titleText, searchTerm);
+
+                let statusBadge = '';
+                if (task.status === STATUSES.HOLD) {
+                    statusBadge = `<span class="text-xs font-semibold px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full">暫緩中</span>`;
+                }
+                const priorityBadge = `<span class="text-xs font-semibold px-2 py-0.5 rounded-full priority-badge-${task.priority}">${task.priority}</span>`;
+                const descHTML = highlightText(task.description || '', searchTerm);
+                const imageHTML = task.imageData ?
+                `<img src="${task.imageData}" loading="lazy" class="mt-3 rounded-lg max-h-48 w-auto shadow-sm">` : '';
+                
+                const progressLogHTML = renderProgressLog(task); 
+                const subtasksHTML = renderSubtasks(task);
+                
+                let subtaskIndicatorHTML = '';
+                if (task.subtasks && task.subtasks.length > 0) {
+                    const completedCount = task.subtasks.filter(st => st.completed).length;
+                    subtaskIndicatorHTML = `
+                        <span class="ml-2 flex items-center text-xs text-slate-500 font-normal" title="包含子任務">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg>
+                            ${completedCount} / ${task.subtasks.length}
+                        </span>
+                    `;
+                }
+                
+                const dueDateHTML = task.dueDate ? `<p class="text-xs text-slate-500 mt-1">截止於 ${new Date(task.dueDate).toLocaleDateString('zh-TW')}</p>` : '';
+                card.innerHTML = `
+                    <div class="task-header flex justify-between items-start gap-2 cursor-pointer">
+                        <h3 class="font-semibold text-slate-800 pr-2 flex-grow flex items-center">${titleHTML}${subtaskIndicatorHTML}</h3>
+                        <div class="flex items-center flex-shrink-0 gap-2">
+                
+                            ${priorityBadge}
+                            ${statusBadge}
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-400 expand-arrow" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" 
+                            /></svg>
+                        </div>
+                    </div>
+                    <div class="task-details">
+                        <p class="text-slate-600 text-sm whitespace-pre-wrap mt-2">${descHTML}</p>
+       
+                         ${imageHTML}
+                        ${progressLogHTML} 
+                        <div class="subtasks-container mt-4">${subtasksHTML}</div>
+                        <div class="mt-3 pt-3 border-t border-slate-200/80 flex justify-between items-center 
+                        text-xs">
+                            <div>
+                                <div class="font-medium text-slate-500 flex items-center group">
+                                   
+                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd" /></svg> 
+                                    <span class="assignee-text">${task.assignee || '未指派'}</span>
+                                    <button class="inline-edit-assignee-btn p-1 text-slate-400 hover:text-indigo-600 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 
+                                        14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg>
+                                    </button>
+                                </div>
+                               
+                                 <p class="text-slate-400 mt-1">由 ${task.createdBy || '未知'} 於 ${task.createdAt ? new Date(task.createdAt.seconds * 1000).toLocaleDateString() : ''} 建立</p>
+                                ${dueDateHTML}
+                            </div>
+                            <div class="relative flex items-center space-x-1">
+  
+                               <button class="history-btn p-1.5 text-slate-400 hover:bg-sky-100 hover:text-sky-600 rounded-full transition-colors" title="檢視歷史紀錄"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.414-1.414L11 9.586V6z" clip-rule="evenodd" /></svg></button>
+                             
+                                   ${generateActionButtons(task)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                return card;
+            }
+
+            function generateActionButtons(task) { 
+                const editButtonHTML = `<button class="edit-btn p-1.5 text-slate-400 hover:bg-indigo-100 hover:text-indigo-600 rounded-full transition-colors" title="編輯任務"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" /></svg></button>`;
+                const deleteButtonHTML = `<button class="delete-btn p-1.5 text-slate-400 hover:bg-rose-100 hover:text-rose-600 rounded-full transition-colors" title="移至垃圾桶"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg></button>`;
+                if (task.status === STATUSES.COMPLETED) { return `<button class="action-option p-1.5 text-slate-400 hover:bg-amber-100 hover:text-amber-600 rounded-full transition-colors" title="復原任務" data-status="${STATUSES.TODO}"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a8 8 0 100 16 8 8 0 000-16zM8.707 14.707a1 1 0 01-1.414 0L4.586 12a1 1 0 111.414-1.414L8 12.586l5.293-5.293a1 1 0 111.414 1.414l-6 6z" /></svg></button>` + deleteButtonHTML;
+                } let menuItems = `<a href="#" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 action-option" data-status="${STATUSES.COMPLETED}">完成</a>`;
+                if (task.status !== STATUSES.HOLD) { menuItems += `<a href="#" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 action-option" data-status="${STATUSES.HOLD}">暫緩</a>`;
+                } else { menuItems = `<a href="#" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 action-option" data-status="${STATUSES.TODO}">恢復處理</a>` + menuItems;
+                } const mainAction = `<div class="relative"><button class="action-menu-btn p-1.5 text-slate-400 hover:bg-emerald-100 hover:text-emerald-600 rounded-full transition-colors" title="操作"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg></button><div class="action-menu hidden origin-top-right absolute right-0 bottom-full mb-2 w-32 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10"><div class="py-1">${menuItems}</div></div></div>`;
+                return mainAction + editButtonHTML + deleteButtonHTML; 
+            }
+
+            function renderSubtasks(task) { let html = '';
+                if (task.subtasks && task.subtasks.length > 0) { html += '<h4 class="text-sm font-semibold mb-2 text-slate-600">子任務：</h4><ul class="space-y-2 pl-1 mb-3">';
+                    task.subtasks.forEach((subtask, index) => { html += `<li class="flex items-center justify-between group" data-index="${index}"><div class="flex items-center flex-grow"><input type="checkbox" id="subtask-${task.id}-${index}" class="subtask-checkbox h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" ${subtask.completed ? 'checked' : ''}><label for="subtask-${task.id}-${index}" class="ml-3 block text-sm text-slate-700 ${subtask.completed ? 'line-through text-slate-400' : ''}">${subtask.text}</label></div><button class="delete-subtask-btn text-slate-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition px-2" title="刪除子任務"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg></button></li>`; });
+                    html += '</ul>'; } if (task.status !== STATUSES.COMPLETED) { html += `<form class="add-subtask-form mt-2 flex items-center space-x-2"><input type="text" placeholder="新增子任務..." class="custom-input flex-grow w-full text-sm px-3 py-1.5 border border-slate-300 rounded-md focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 transition"><button type="submit" class="text-sm bg-slate-200 text-slate-600 font-semibold py-1.5 px-3 rounded-md hover:bg-slate-300 transition flex-shrink-0">新增</button><button type="button" class="generate-subtasks-btn p-1.5 text-slate-400 hover:bg-indigo-100 hover:text-indigo-600 rounded-full transition-colors" title="AI 產生子任務"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg></button></form>`;
+                } return html; }
+            
+            async function addReminderHistory(taskId, method) {
+                const task = state.localTasksCache.get(taskId);
+                if (!task) return false;
+                const reminderHistory = { status: '催辦通知', reason: `由 ${state.userName} 透過 ${method} 發送提醒`, timestamp: Timestamp.now(), user: state.userName };
+                const updatedHistory = [...(task.history || []), reminderHistory];
+                try { await updateDoc(doc(state.db, 'tasks', taskId), { history: updatedHistory }); return true;
+                } catch (error) { console.error(`透過 ${method} 催辦失敗:`, error); return false;
+                }
+            }
+
+            function showDueTaskStatusMessage(message) {
+                dom.dueTasksStatusMsg.textContent = message;
+                dom.dueTasksStatusMsg.classList.remove('opacity-0');
+                setTimeout(() => dom.dueTasksStatusMsg.classList.add('opacity-0'), 3000);
+            }
+
+            function handleViewChange(newView) {
+                state.currentView = newView;
+                localStorage.setItem('currentView', newView);
+                if (newView !== MANAGER_VIEW) { state.activeDepartmentTab = ALL_TASKS_TAB; localStorage.setItem('activeDepartmentTab', ALL_TASKS_TAB);
+                }
+                renderDepartmentsAndViewsUI(); renderTasksAndTrash();
+            }
+
+            function bindEventListeners() { 
+                dom.viewSwitcher.addEventListener('change', (e) => handleViewChange(e.target.value));
+                dom.addTaskForm.addEventListener('submit', handleAddTask); 
+                dom.editTaskForm.addEventListener('submit', handleUpdateTask); 
+                dom.cancelEditBtn.addEventListener('click', hideEditModal); 
+                dom.searchInput.addEventListener('input', renderTasksAndTrash); 
+                dom.clearCompletedBtn.addEventListener('click', clearCompletedTasks); 
+                dom.editDepartmentNameBtn.addEventListener('click', handleEditDepartmentName);
+                dom.tabsSelect.addEventListener('change', (e) => updateActiveTab(e.target.value));
+                dom.todoList.addEventListener('click', handleTaskCardClick);
+                dom.completedList.addEventListener('click', handleTaskCardClick);
+                dom.departmentTabsContainer.addEventListener('click', handleDepartmentActions); 
+                dom.todoList.addEventListener('submit', handleSubtaskForms); 
+                dom.todoList.addEventListener('change', handleSubtaskForms); 
+                dom.completedList.addEventListener('submit', handleSubtaskForms);
+                dom.completedList.addEventListener('change', handleSubtaskForms);
+                dom.importBtnMain.addEventListener('click', () => { renderAllDepartmentSelects(); dom.importModal.classList.remove('hidden'); dom.importModal.classList.add('flex'); });
+                dom.cancelImportBtn.addEventListener('click', () => { dom.importModal.classList.add('hidden'); dom.importModal.classList.remove('flex'); });
+                dom.confirmImportBtn.addEventListener('click', handleImportFromText); 
+                dom.addDepartmentFromImportBtn.addEventListener('click', handleAddDepartmentFromImport);
+                dom.sortControls.addEventListener('click', handleSortClick);
+                dom.copyTitleToDescBtn.addEventListener('click', () => { dom.addTaskDesc.value = dom.addTaskTitle.value; updateAiSummarizeBtnState(); });
+                dom.statusReasonForm.addEventListener('submit', (e) => { e.preventDefault(); const { taskId, newStatus } = state.statusChangeContext; updateTaskStatus(taskId, newStatus, dom.statusReasonInput.value); dom.statusReasonModal.classList.add('hidden'); dom.statusReasonModal.classList.remove('flex'); dom.statusReasonInput.value = ''; });
+                dom.cancelStatusReasonBtn.addEventListener('click', () => { const { taskId, newStatus } = state.statusChangeContext; updateTaskStatus(taskId, newStatus); dom.statusReasonModal.classList.add('hidden'); dom.statusReasonModal.classList.remove('flex'); dom.statusReasonInput.value = ''; });
+                dom.closeHistoryBtn.addEventListener('click', () => { dom.historyModal.classList.add('hidden'); dom.historyModal.classList.remove('flex'); }); 
+                dom.toggleTrashBtn.addEventListener('click', () => { dom.trashContainer.classList.toggle('open'); dom.trashArrow.classList.toggle('rotate-180'); }); 
+                dom.trashList.addEventListener('click', handleTrashActions); 
+                dom.aiGenerateDescBtn.addEventListener('click', handleAiGenerateDesc); 
+                dom.aiSummarizeBtn.addEventListener('click', handleAiSummarize);
+                dom.addTaskDesc.addEventListener('input', updateAiSummarizeBtnState); 
+                dom.imageInputBtn.addEventListener('click', () => dom.imageFileInput.click()); 
+                dom.imageFileInput.addEventListener('change', handleImageUpload); 
+                dom.pasteBtnTitle.addEventListener('click', () => handlePaste(dom.addTaskTitle)); 
+                dom.pasteBtnDesc.addEventListener('click', () => handlePaste(dom.addTaskDesc)); 
+                dom.undoBtn.addEventListener('click', handleUndoImport);
+                dom.closeDueTasksBtn.addEventListener('click', () => { dom.dueTasksModal.classList.add('hidden'); dom.dueTasksModal.classList.remove('flex'); showMainApp(); });
+                dom.dueTasksList.addEventListener('click', async (e) => {
+                    const taskItem = e.target.closest('.due-task-item'); if (!taskItem) return;
+                    const taskId = taskItem.dataset.taskId; const task = state.localTasksCache.get(taskId); if (!task) return;
+                    if (e.target.closest('.remind-via-email-btn')) {
+          
+                       const subject = encodeURIComponent(`【任務催辦】請回報「${task.title}」進度`);
+                        const body = encodeURIComponent(`提醒 ${task.assignee || '同仁'}：\n\n任務：「${task.title}」\n截止日期：${task.dueDate}\n\n此任務已到期，請儘速回報進度，謝謝！`);
+                        window.location.href = `mailto:${task.assignee || ''}?subject=${subject}&body=${body}`;
+                        await 
+                        addReminderHistory(taskId, 'Email'); showDueTaskStatusMessage('Email 已開啟...');
+                    } else if (e.target.closest('.remind-via-line-btn')) {
+                        const btn = e.target.closest('.remind-via-line-btn');
+                        const message = `提醒【${task.assignee ||
+                        '負責同仁'}】，任務「${task.title}」已到期(${task.dueDate})，請儘速回報進度。`;
+                        try {
+                           await navigator.clipboard.writeText(message);
+                           await addReminderHistory(taskId, 'LINE');
+                           btn.innerHTML = `<svg class="w-5 h-5 text-emerald-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>`;
+                           btn.disabled = true; showDueTaskStatusMessage('LINE 提醒訊息已複製！');
+                        } catch(err) { console.error('複製失敗: ', err); showDueTaskStatusMessage('複製失敗，請檢查瀏覽器設定');
+                        }
+                    } else if (e.target.closest('.task-link')) {
+                        dom.dueTasksModal.classList.add('hidden');
+                        dom.dueTasksModal.classList.remove('flex');
+                        showMainApp(); focusOnTask(taskId);
+                    }
+                });
+                dom.copyAllRemindersBtn.addEventListener('click', async () => {
+                    const lineButtons = dom.dueTasksList.querySelectorAll('.remind-via-line-btn:not(:disabled)');
+                    if (lineButtons.length === 0) { showDueTaskStatusMessage('所有任務均已催辦'); return; }
+                    let allMessages = ''; const taskIdsToUpdate = [];
+                   
+                     lineButtons.forEach(btn => {
+                        const taskId = btn.closest('.due-task-item').dataset.taskId; const task = state.localTasksCache.get(taskId);
+                        if (task) { allMessages += `提醒【${task.assignee || '負責同仁'}】，任務「${task.title}」已到期(${task.dueDate})，請儘速回報進度。\n`; taskIdsToUpdate.push(taskId); }
+                    });
+             
+                       try {
+                        await navigator.clipboard.writeText(allMessages.trim());
+                        const batch = writeBatch(state.db);
+                        taskIdsToUpdate.forEach(taskId => {
+              
+                               const task = state.localTasksCache.get(taskId);
+                               const reminderHistory = { status: '催辦通知', reason: `由 ${state.userName} 透過 LINE (批次) 發送提醒`, timestamp: Timestamp.now(), user: state.userName };
+                               const updatedHistory = [...(task.history || []), reminderHistory];
+                             const taskRef = doc(state.db, 'tasks', taskId);
+                             batch.update(taskRef, { history: updatedHistory });
+                        });
+                        await batch.commit();
+                        lineButtons.forEach(btn => {
+                            btn.innerHTML = `<svg class="w-5 h-5 text-emerald-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>`;
+                            btn.disabled = true;
+     
+                                   });
+                        showDueTaskStatusMessage(`已複製 ${lineButtons.length} 則 LINE 提醒！`);
+                    } catch(err) { console.error('批次複製失敗: ', err); showDueTaskStatusMessage('複製失敗，請檢查瀏覽器設定');
+                    }
+                });
+                window.addEventListener('online', () => updateOnlineStatus(true)); 
+                window.addEventListener('offline', () => updateOnlineStatus(false)); 
+                updateOnlineStatus(navigator.onLine); 
+                
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (SpeechRecognition) { 
+                    recognition = new SpeechRecognition();
+                    recognition.continuous = false; recognition.lang = 'zh-TW'; recognition.interimResults = false;
+                    recognition.onstart = () => { showStatusMessage('正在聆聽...'); };
+                    recognition.onresult = (event) => { 
+                        if (state.activeRecognitionTarget) { 
+                            state.activeRecognitionTarget.value += event.results[0][0].transcript;
+                            if (state.activeRecognitionTarget === dom.addTaskDesc) updateAiSummarizeBtnState(); 
+                        } 
+                    };
+                    recognition.onerror = (event) => { console.error('語音辨識錯誤:', event.error); showStatusMessage('語音辨識錯誤', true); };
+                    recognition.onend = () => { setTimeout(() => showStatusMessage(''), 2000);
+                        state.activeRecognitionTarget = null; };
+                    const setupRecognition = (target) => { state.activeRecognitionTarget = target; recognition.start(); }; 
+                    dom.voiceInputBtnTitle.addEventListener('click', () => setupRecognition(dom.addTaskTitle));
+                    dom.voiceInputBtnDesc.addEventListener('click', () => setupRecognition(dom.addTaskDesc));
+                    dom.voiceInputBtnAssignee.addEventListener('click', () => setupRecognition(dom.addTaskAssignee)); 
+                } 
+            }
+            
+            async function handleDepartmentActions(e) {
+                const tabLink = e.target.closest('a[data-department]');
+                if (tabLink) { e.preventDefault(); updateActiveTab(tabLink.dataset.department); return; }
+                const removeBtn = e.target.closest('.remove-category-btn');
+                if (removeBtn) { 
+                    e.stopPropagation();
+                    const { departmentId, departmentName } = removeBtn.dataset; 
+                    if (confirm(`確定要移除部門 "${departmentName}" 嗎？\n此部門下的所有任務將會被永久刪除。`)) { 
+                        await removeDepartment(departmentId, departmentName);
+                    } return;
+                } 
+                if (e.target.id === 'add-department-btn') { 
+                    const newDepartmentName = prompt("請輸入新的部門名稱：");
+                    if (newDepartmentName && newDepartmentName.trim()) { 
+                        const newOrder = state.departments.length;
+                        await addDepartment(newDepartmentName.trim(), newOrder);
+                    } 
+                } 
+                const exportBtn = e.target.closest('.export-category-btn');
+                if (exportBtn) { handleExport(exportBtn.dataset.departmentName); } 
+            }
+            
+            async function addDepartment(name, order) {
+                const departmentNames = state.departments.map(c => c.name);
+                if (departmentNames.includes(name)) { alert('此部門名稱已存在！'); return null; }
+                try { const docRef = await addDoc(collection(state.db, "categories"), { name, order });
+                    return docRef;
+                } catch (error) { console.error("新增部門失敗:", error); return null;
+                }
+            }
+
+            async function handleAddDepartmentFromImport() {
+                const newDepartmentName = prompt("請輸入新的部門名稱：");
+                if (newDepartmentName && newDepartmentName.trim()) {
+                    const newOrder = state.departments.length;
+                    await addDepartment(newDepartmentName.trim(), newOrder);
+                }
+            }
+
+            async function removeDepartment(departmentId, departmentName) { 
+                const tasksToDeleteQuery = query(collection(state.db, 'tasks'), where("category", "==", departmentName));
+                const querySnapshot = await getDocs(tasksToDeleteQuery); 
+                const batch = writeBatch(state.db); 
+                querySnapshot.forEach(doc => { batch.delete(doc.ref); }); 
+                batch.delete(doc(state.db, 'categories', departmentId)); 
+                await batch.commit();
+                if (state.activeDepartmentTab === departmentName) { updateActiveTab(ALL_TASKS_TAB); } 
+            }
+            
+            async function updateDepartmentName(id, oldName, newName) {
+                if (!newName || newName === oldName) return false;
+                const tasksToUpdateQuery = query(collection(state.db, 'tasks'), where("category", "==", oldName));
+                const querySnapshot = await getDocs(tasksToUpdateQuery);
+                const batch = writeBatch(state.db);
+                querySnapshot.forEach(doc => { batch.update(doc.ref, { category: newName }); });
+                batch.update(doc(state.db, 'categories', id), { name: newName });
+                try {
+                    await batch.commit();
+                    if (state.activeDepartmentTab === oldName) { state.activeDepartmentTab = newName; localStorage.setItem('activeDepartmentTab', newName);
+                    }
+                    if (state.currentView === oldName) { handleViewChange(newName);
+                    }
+                    return true;
+                } catch (error) { console.error("更新部門名稱失敗:", error); return false; }
+            }
+
+            async function handleEditDepartmentName() {
+                const currentDepartmentName = dom.editTaskDepartment.value;
+                if (!currentDepartmentName) { alert('請先選擇一個要編輯的部門。'); return; }
+                const departmentToEdit = state.departments.find(c => c.name === currentDepartmentName);
+                if (!departmentToEdit) return;
+                const newDepartmentName = prompt("請輸入新的部門名稱：", currentDepartmentName);
+                if (newDepartmentName === null || !newDepartmentName.trim() || newDepartmentName.trim() === currentDepartmentName) { return;
+                }
+                const trimmedNewName = newDepartmentName.trim();
+                if (state.departments.some(c => c.name === trimmedNewName)) { alert('此部門名稱已存在！'); return; }
+                const success = await updateDepartmentName(departmentToEdit.id, departmentToEdit.name, trimmedNewName);
+                if (success) {
+                    const currentTask = state.localTasksCache.get(state.currentEditingTaskId);
+                    if (currentTask && currentTask.category === currentDepartmentName) { dom.editTaskDepartment.value = trimmedNewName;
+                    }
+                }
+            }
+            
+            function handleTaskCardClick(e) {
+                const target = e.target;
+                const taskCard = target.closest('.task-card');
+                if (!taskCard) return;
+
+                const taskId = taskCard.dataset.id;
+                const taskData = state.localTasksCache.get(taskId);
+                
+                const progressForm = target.closest('.add-progress-log-form');
+                if (progressForm) {
+                    e.preventDefault();
+                    const textarea = progressForm.querySelector('textarea');
+                    if (textarea.value.trim()) { addProgressLog(taskId, textarea.value.trim()); textarea.value = '';
+                    }
+                    return;
+                }
+                if (target.closest('.paste-progress-btn')) { handlePaste(target.closest('.add-progress-log-form').querySelector('textarea'));
+                    return; }
+                if (target.closest('.voice-input-btn-progress')) {
+                    const textarea = target.closest('.add-progress-log-form').querySelector('textarea');
+                    if(recognition) { state.activeRecognitionTarget = textarea; recognition.start(); }
+                    return;
+                }
+                if (target.closest('.copy-progress-log-btn')) { copyProgressLogAsLinePost(taskData);
+                    return; }
+
+                const isActionButton = target.closest('button, a, input, textarea, form');
+                if (isActionButton) {
+                    if (target.closest('.delete-btn')) { deleteTask(taskId);
+                    } 
+                    else if (target.closest('.edit-btn')) { showEditModal(state.localTasksCache.get(taskId));
+                    } 
+                    else if (target.closest('.action-menu-btn')) { e.stopPropagation();
+                    const menu = taskCard.querySelector('.action-menu'); if(menu) menu.classList.toggle('hidden'); } 
+                    else if (target.closest('.action-option')) { e.preventDefault();
+                    handleStatusChange(taskId, target.closest('.action-option').dataset.status); }
+                    else if (target.closest('.history-btn')) { showHistoryModal(state.localTasksCache.get(taskId));
+                    }
+                    else if (target.closest('.inline-edit-assignee-btn')) { handleAssigneeInlineEdit(target.closest('.group'), taskId);
+                    }
+                    else if (target.closest('.delete-subtask-btn')) { 
+                        const subtaskIndex = parseInt(target.closest('li').dataset.index);
+                        if (confirm('確定要刪除這個子任務嗎？')) { deleteSubtask(taskId, subtaskIndex); }
+                    }
+                    return;
+                }
+                if (target.closest('.task-header')) { taskCard.classList.toggle('expanded');
+                }
+            }
+
+            async function addProgressLog(taskId, content) {
+                const task = state.localTasksCache.get(taskId);
+                if (!task) return;
+                const newLogEntry = { content: content, user: state.userName, timestamp: Timestamp.now() };
+                const updatedLog = [...(task.progressLog || []), newLogEntry];
+                try { await updateDoc(doc(state.db, 'tasks', taskId), { progressLog: updatedLog });
+                } catch(error) { console.error("新增進度記錄失敗:", error); }
+            }
+
+            function copyProgressLogAsLinePost(task) {
+                if (!task || !task.progressLog || task.progressLog.length === 0) { showStatusMessage('沒有可複製的進度記錄', true);
+                    return; }
+                let fullPost = `【任務進度回報】\n標題：${task.title}\n負責人：${task.assignee || '未指派'}\n----------------------\n`;
+                task.progressLog.forEach(log => {
+                    const logDate = new Date(log.timestamp.seconds * 1000).toLocaleDateString('zh-TW');
+                    fullPost += `[${logDate}] ${log.content}\n`;
+                });
+                try { navigator.clipboard.writeText(fullPost); showStatusMessage('已成功複製為LINE貼文格式！', false);
+                } catch(err) { console.error("複製失敗:", err); showStatusMessage('複製失敗，請檢查瀏覽器權限', true);
+                }
+            }
+
+            function handleAssigneeInlineEdit(container, taskId) {
+                const textSpan = container.querySelector('.assignee-text');
+                const currentName = textSpan.textContent;
+                const input = document.createElement('input');
+                input.type = 'text'; input.value = currentName;
+                input.setAttribute('list', 'assignee-list');
+                input.className = 'assignee-inline-input custom-input text-xs p-1 w-24';
+                textSpan.style.display = 'none';
+                container.insertBefore(input, textSpan.nextSibling);
+                input.focus(); input.select();
+                const saveChanges = async () => {
+                    const newName = input.value.trim() || '未指派';
+                    if(newName !== currentName) { await updateDoc(doc(state.db, 'tasks', taskId), { assignee: newName });
+                    }
+                };
+                const handleKeyDown = (e) => {
+                    if (e.key === 'Enter') { e.preventDefault();
+                    input.blur(); } 
+                    else if (e.key === 'Escape') { e.preventDefault();
+                    input.removeEventListener('blur', saveChanges); input.remove(); textSpan.style.display = ''; }
+                }
+                input.addEventListener('blur', saveChanges, { once: true });
+                input.addEventListener('keydown', handleKeyDown);
+            }
+
+            async function handleAddTask(e) { 
+                e.preventDefault();
+                const newOrder = Array.from(state.localTasksCache.values()).filter(t => t.status !== STATUSES.COMPLETED && t.status !== STATUSES.DELETED).length; 
+                const newAssignee = dom.addTaskAssignee.value.trim() || '未指派';
+                const newTask = { 
+                    title: dom.addTaskTitle.value, 
+                    description: dom.addTaskDesc.value, 
+                    dueDate: dom.addTaskDueDate.value, 
+                    createdAt: serverTimestamp(), 
+                    category: dom.addTaskDepartment.value, 
+                    creatorUid: state.auth.currentUser.uid, // 新的、安全的作法，使用 uid
+                    creatorName: state.userName, // 同時也記錄名稱，方便顯示 
+                    status: STATUSES.TODO, 
+                    order: newOrder, 
+                    imageData: state.currentImageBase64, 
+                    subtasks: [], 
+                    priority: dom.addTaskPriority.value, 
+                    assignee: newAssignee, 
+                    history: [{ status: STATUSES.TODO, reason: '初始建立', timestamp: Timestamp.now(), user: state.userName }], 
+                    progressLog: [],
+                    isFromCEO: dom.addTaskDepartment.value === '董總交辦'
+                };
+                try { 
+                    await addDoc(collection(state.db, 'tasks'), newTask);
+                    dom.addTaskForm.reset(); 
+                    dom.addTaskDepartment.value = (state.activeDepartmentTab !== ALL_TASKS_TAB) ? state.activeDepartmentTab : (state.departments[0]?.name || '');
+                    dom.imagePreviewContainer.innerHTML = ''; 
+                    state.currentImageBase64 = null; 
+                    updateAiSummarizeBtnState();
+                } catch (error) { console.error("新增任務失敗:", error); } 
+            }
+
+            async function handleUpdateTask(e) {
+    e.preventDefault();
+    if (!state.currentEditingTaskId) return;
+
+    const originalTask = state.localTasksCache.get(state.currentEditingTaskId);
+    if (!originalTask) return;
+
+    const isCopyOperation = dom.editTaskCopyCheckbox.checked;
+    const targetDepartment = dom.editTaskDepartment.value;
+    const newAssignee = dom.editTaskAssignee.value.trim() || '未指派';
+    const newDueDate = dom.editTaskDueDate.value;
+    let updatedHistory = [...(originalTask.history || [])];
+    if (originalTask.dueDate !== newDueDate) {
+        const reason = `截止日期從 ${originalTask.dueDate || '未設定'} 改為 ${newDueDate || '未設定'}`;
+        updatedHistory.push({ status: '日期變更', reason: reason, timestamp: Timestamp.now(), user: state.userName });
+    }
+
+    const updatedDataForOriginalTask = {
+        title: dom.editTaskTitle.value,
+        description: dom.editTaskDesc.value,
+        dueDate: newDueDate,
+        priority: dom.editTaskPriority.value,
+        assignee: newAssignee,
+        history: updatedHistory,
+        category: originalTask.category 
+    };
+    try {
+        if (isCopyOperation) {
+            if (targetDepartment === originalTask.category) {
+                alert('不能將任務複製到相同的部門！');
+                return;
+            }
+
+            const batch = writeBatch(state.db);
+            const linkedId = originalTask.linkedId || doc(collection(state.db, 'tasks')).id;
+
+            if (!originalTask.linkedId) {
+                const originalTaskRef = doc(state.db, 'tasks', originalTask.id);
+                batch.update(originalTaskRef, { linkedId: linkedId });
+            }
+
+            const copiedTaskData = {
+                ...originalTask, // Start with original data to preserve subtasks, etc.
+                ...updatedDataForOriginalTask, // Overwrite with edited data
+                category: targetDepartment,
+                linkedId: linkedId,
+                createdAt: serverTimestamp(),
+                history: [{ status: originalTask.status, reason: `從 [${originalTask.category}] 部門的任務複製而來`, timestamp: Timestamp.now(), user: state.userName }],
+            };
+            const newDocRef = doc(collection(state.db, 'tasks'));
+            batch.set(newDocRef, copiedTaskData);
+            await batch.commit();
+            showStatusMessage(`任務已複製到 ${targetDepartment}`, false);
+        } else {
+            updatedDataForOriginalTask.category = targetDepartment;
+        }
+
+        await updateDoc(doc(state.db, 'tasks', originalTask.id), updatedDataForOriginalTask);
+        hideEditModal();
+
+    } catch (error) {
+        console.error("更新或複製任務失敗:", error);
+        showStatusMessage("操作失敗，請稍後再試", true);
+    } finally {
+        dom.editTaskCopyCheckbox.checked = false;
+    }
+}
+
+function handleStatusChange(taskId, newStatus) {
+        const task = state.localTasksCache.get(taskId);
+        if (!task) return;
+        if (task.status === STATUSES.TODO && newStatus === STATUSES.HOLD) {
+            state.statusChangeContext = { taskId, newStatus };
+            dom.newStatusLabel.textContent = newStatus;
+            dom.statusReasonModal.classList.remove('hidden'); dom.statusReasonModal.classList.add('flex');
+            dom.statusReasonInput.focus();
+        } else { updateTaskStatus(taskId, newStatus);
+        }
+    }
+
+    async function updateTaskStatus(taskId, newStatus, reason = '') { 
+        const task = state.localTasksCache.get(taskId);
+        if (!task) return; 
+        const newHistoryEntry = { status: newStatus, reason: reason.trim() || '狀態變更', timestamp: Timestamp.now(), user: state.userName };
+        const updatedHistory = [...(task.history || []), newHistoryEntry];
+        const updateData = { status: newStatus, history: updatedHistory, updatedAt: serverTimestamp() };
+        if (newStatus === STATUSES.COMPLETED && task.linkedId) {
+            const batch = writeBatch(state.db);
+            const q = query(collection(state.db, 'tasks'), where("linkedId", "==", task.linkedId));
+            try {
+                const querySnapshot = await getDocs(q);
+                querySnapshot.forEach(doc => {
+                    const docRef = doc.ref;
+                    const docHistory = doc.data().history || [];
+                    const newLinkedHistory = [...docHistory, { ...newHistoryEntry, 
+                        reason: `由關聯任務 [${task.title}] 連動完成` }];
+                    batch.update(docRef, { status: newStatus, history: newLinkedHistory, updatedAt: serverTimestamp() });
+                });
+                await batch.commit();
+            } catch (error) {
+                console.error("連動結案失敗:", error);
+                await updateDoc(doc(state.db, 'tasks', taskId), updateData);
+            }
+        } else { await updateDoc(doc(state.db, 'tasks', taskId), updateData);
+        }
+    }
+
+async function deleteTask(id) { if (!id) return;
+        if (confirm('確定要將此任務移至垃圾桶嗎？')) { await updateTaskStatus(id, STATUSES.DELETED, '移至垃圾桶'); } }
+    
+    function showEditModal(task) { if(!task) return;
+        state.currentEditingTaskId = task.id; dom.editTaskTitle.value = task.title || ''; dom.editTaskDesc.value = task.description || ''; dom.editTaskDueDate.value = task.dueDate || '';
+        dom.editTaskDepartment.value = task.category || state.departments[0].name; dom.editTaskPriority.value = task.priority || '中'; dom.editTaskAssignee.value = task.assignee || ''; dom.editModalOverlay.classList.remove('hidden'); dom.editModalOverlay.classList.add('flex');
+    }
+    
+    function hideEditModal() { 
+        state.currentEditingTaskId = null;
+        dom.editModalOverlay.classList.add('hidden'); 
+        dom.editModalOverlay.classList.remove('flex'); 
+        dom.editTaskCopyCheckbox.checked = false;
+    }
+    
+    function updateActiveTab(newTab) { state.activeDepartmentTab = newTab;
+        localStorage.setItem('activeDepartmentTab', newTab); renderDepartmentsAndViewsUI(); renderTasksAndTrash(); }
+    
+    function showError(message) { dom.loadingOverlay.innerHTML = `<div class="text-center text-red-700 bg-red-100 p-4 rounded-lg"><h3>錯誤</h3><p>${message}</p></div>`;
+        dom.loadingOverlay.style.display = 'flex'; }
+    
+    function handleTrashActions(e) { 
+        const restoreBtn = e.target.closest('.restore-btn');
+        if (restoreBtn) { updateTaskStatus(restoreBtn.dataset.taskId, STATUSES.TODO, '從垃圾桶還原'); return; } 
+        const permDeleteBtn = e.target.closest('.perm-delete-btn');
+        if (permDeleteBtn) { if (confirm('確定要永久刪除這個任務嗎？此操作無法復原。')) { deleteDoc(doc(state.db, 'tasks', permDeleteBtn.dataset.taskId)); } } 
+    }
+    
+    function showHistoryModal(task) { 
+        dom.historyList.innerHTML = '';
+        if (!task.history || task.history.length === 0) { dom.historyList.innerHTML = '<p class="text-slate-500">沒有歷史紀錄。</p>';
+        } 
+        else { task.history.slice().reverse().forEach(entry => { 
+            const item = document.createElement('div'); 
+            item.className = 'history-item pb-2'; 
+            item.innerHTML = `<p class="font-semibold text-slate-800">${entry.status}</p><p class="text-sm text-slate-600">${entry.reason}</p><p class="text-xs text-slate-400 mt-1">${entry.timestamp 
+            ? new Date(entry.timestamp.seconds * 1000).toLocaleString() : '時間未知'} by ${entry.user}</p>`; 
+            dom.historyList.appendChild(item); });
+        } 
+        dom.historyModal.classList.remove('hidden'); 
+        dom.historyModal.classList.add('flex');
+    }
+    
+    async function clearCompletedTasks() { 
+        const tasksToClear = Array.from(state.localTasksCache.values()).filter(t => t.status === STATUSES.COMPLETED && (state.activeDepartmentTab === ALL_TASKS_TAB || t.category === state.activeDepartmentTab));
+        if (tasksToClear.length === 0) return; 
+        if (!confirm(`確定要將 ${tasksToClear.length} 個已完成項目移至垃圾桶嗎？`)) return; 
+        const batch = writeBatch(state.db);
+        tasksToClear.forEach(task => { 
+            const newHistoryEntry = { status: STATUSES.DELETED, reason: '清除已完成項目', timestamp: Timestamp.now(), user: state.userName }; 
+            const updatedHistory = [...(task.history || []), newHistoryEntry]; 
+            batch.update(doc(state.db, 'tasks', task.id), { status: STATUSES.DELETED, history: updatedHistory, updatedAt: serverTimestamp() }); });
+        await batch.commit(); 
+    }
+
+function handleSubtaskForms(e) { 
+        const taskCard = e.target.closest('.task-card');
+        if (!taskCard) return; 
+        const taskId = taskCard.dataset.id; 
+        if (e.target.matches('input.subtask-checkbox')) { 
+            const subtaskIndex = parseInt(e.target.closest('li').dataset.index);
+            toggleSubtaskCompletion(taskId, subtaskIndex);
+        } else if (e.target.closest('.add-subtask-form')) { 
+            e.preventDefault();
+            const form = e.target.closest('.add-subtask-form'); 
+            const input = form.querySelector('input[type="text"]'); 
+            if (input.value.trim()) { addSubtask(taskId, input.value.trim()); input.value = '';
+            } 
+        } 
+    }
+    
+    async function addSubtask(taskId, subtaskText) { 
+        const task = state.localTasksCache.get(taskId);
+        if(!task) return; 
+        const newSubtask = { text: subtaskText, completed: false }; 
+        const updatedSubtasks = [...(task.subtasks || []), newSubtask];
+        await updateDoc(doc(state.db, 'tasks', taskId), { subtasks: updatedSubtasks }); 
+    }
+    
+    async function deleteSubtask(taskId, subtaskIndex) { 
+        const task = state.localTasksCache.get(taskId);
+        if(!task) return; 
+        const updatedSubtasks = [...task.subtasks]; 
+        updatedSubtasks.splice(subtaskIndex, 1); 
+        await updateDoc(doc(state.db, 'tasks', taskId), { subtasks: updatedSubtasks });
+    }
+    
+    async function toggleSubtaskCompletion(taskId, subtaskIndex) { 
+        const task = state.localTasksCache.get(taskId);
+        if(!task) return; 
+        const updatedSubtasks = [...task.subtasks]; 
+        updatedSubtasks[subtaskIndex].completed = !updatedSubtasks[subtaskIndex].completed; 
+        await updateDoc(doc(state.db, 'tasks', taskId), { subtasks: updatedSubtasks });
+    }
+    
+    function updateAiSummarizeBtnState() { 
+        const enabled = dom.addTaskDesc.value.trim() !== '';
+        dom.aiSummarizeBtn.disabled = !enabled; 
+        dom.aiSummarizeBtn.classList.toggle('cursor-not-allowed', !enabled); 
+        dom.aiSummarizeBtn.classList.toggle('ai-btn-enabled', enabled); 
+    }
+    
+    function handleImageUpload(event) { 
+        const file = event.target.files[0];
+        if (!file) return; 
+        const reader = new FileReader(); 
+        reader.onload = (e) => { 
+            state.currentImageBase64 = e.target.result;
+            displayImagePreview(state.currentImageBase64); 
+            generateDescriptionFromImage(state.currentImageBase64); 
+        }; 
+        reader.readAsDataURL(file);
+    }
+    
+    function displayImagePreview(base64) { 
+        dom.imagePreviewContainer.innerHTML = `<div class="relative inline-block group"><img src="${base64}" class="h-24 w-auto rounded-lg shadow-md"><button type="button" class="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full h-6 w-6 flex items-center justify-center text-xs font-bold opacity-0 group-hover:opacity-100 transition">&times;</button></div>`;
+        dom.imagePreviewContainer.querySelector('button').addEventListener('click', () => { 
+            state.currentImageBase64 = null; 
+            dom.imagePreviewContainer.innerHTML = ''; 
+            dom.imageFileInput.value = ''; 
+        });
+    }
+    
+    async function handlePaste(targetInput) { 
+        try { 
+            const text = await navigator.clipboard.readText();
+            targetInput.value += text; 
+            if (targetInput === dom.addTaskDesc) updateAiSummarizeBtnState(); 
+        } catch (error) { console.error('貼上失敗:', error);
+        } 
+    }
+    
+    async function callGemini(payload) { 
+        const apiKey = "";
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`; 
+        try { 
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (!response.ok) throw new Error(`API 請求失敗: ${response.status}`); 
+            const data = await response.json(); 
+            return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+        } catch (error) { 
+            console.error('Gemini API 呼叫失敗:', error);
+            showStatusMessage('AI 功能暫時無法使用。', true); 
+            return null;
+        } 
+    }
+    
+    async function handleAiGenerateDesc(e) { 
+        const button = e.currentTarget;
+        const title = dom.addTaskTitle.value; 
+        if (!title.trim()) { showStatusMessage('請先輸入任務標題', true); return;
+        } 
+        button.disabled = true;
+        showStatusMessage('AI 正在產生描述...');
+        const prompt = `你是一個專案管理助理，請根據以下任務標題，產生一份簡潔、專業的任務描述，使用繁體中文。任務標題： "${title}"`; 
+        const result = await callGemini({ contents: [{ parts: [{ text: prompt }] }] });
+        if (result) { dom.addTaskDesc.value = result.trim(); updateAiSummarizeBtnState(); showStatusMessage('AI 描述已產生！'); } 
+        button.disabled = false;
+    }
+    
+    async function handleAiSummarize(e) { 
+        const button = e.currentTarget;
+        const description = dom.addTaskDesc.value; 
+        if (!description.trim()) return; 
+        button.disabled = true; 
+        showStatusMessage('AI 正在總結標題...'); 
+        const prompt = `請將以下任務描述總結成一個不超過 15 個字的精簡標題，使用繁體中文。任務描述： "${description}"`;
+        const result = await callGemini({ contents: [{ parts: [{ text: prompt }] }] });
+        if (result) { dom.addTaskTitle.value = result.replace(/["'「」]/g, '').trim(); showStatusMessage('AI 標題已產生！'); } 
+        button.disabled = false; 
+    }
+    
+    async function generateDescriptionFromImage(base64Data) { 
+        showStatusMessage('AI 正在分析圖片...'); 
+     
+        const payload = { contents: [{ parts: [{ text: "請根據這張圖片，用繁體中文產生一段簡短的任務描述。" }, { inlineData: { mimeType: "image/png", data: base64Data.split(',')[1] } }] }] }; 
+        const result = await callGemini(payload); 
+        if (result) { dom.addTaskDesc.value = result.trim(); updateAiSummarizeBtnState(); showStatusMessage('已根據圖片產生描述！'); } 
+    }
+    
+     
+    async function handleGenerateSubtasks(e, task) { 
+        const button = e.currentTarget; 
+        if (!task.title) { showStatusMessage('任務需要標題才能產生子任務', true); return; } 
+        button.disabled = true; 
+        const spinner = `<svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+        const originalContent = button.innerHTML; 
+        button.innerHTML = spinner; 
+        const prompt = `你是一個專案管理助理。根據以下主要任務，請將其拆解成 3 到 5 個具體的、可操作的子任務。請僅回傳一個 JSON 格式的陣列，例如：["子任務一", "子任務二"]。\n\n主要任務標題：${task.title}\n主要任務描述：${task.description || '(無描述)'}`;
+        const result = await callGemini({ contents: [{ parts: [{ text: prompt }] }] });
+        if (result) { 
+            try { 
+                const subtaskTexts = JSON.parse(result);
+                if (Array.isArray(subtaskTexts)) { 
+                    const newSubtasks = subtaskTexts.map(text => ({ text, completed: false }));
+                    const updatedSubtasks = [...(task.subtasks || []), ...newSubtasks]; 
+                    await updateDoc(doc(state.db, 'tasks', task.id), { subtasks: updatedSubtasks });
+                } 
+            } catch (err) { console.error("解析 AI 子任務失敗:", err);
+                showStatusMessage('AI 回應格式錯誤', true); } 
+        } 
+        button.innerHTML = originalContent;
+        button.disabled = false;
+    }
+    
+    function showStatusMessage(message, isError = false) { 
+        dom.statusMessage.textContent = message;
+        dom.statusMessage.className = `text-sm text-center h-5 ${isError ? 'text-red-600' : 'text-slate-500'}`;
+        if (message) { setTimeout(() => { if (dom.statusMessage.textContent === message) { dom.statusMessage.textContent = ''; } }, 4000);
+        } 
+    }
+    
+    function showImportStatusMessage(message, isError = true) {
+        if (!dom.importStatusMessage) return;
+        dom.importStatusMessage.textContent = message;
+        dom.importStatusMessage.className = `text-sm text-center h-5 mt-2 ${isError ? 'text-red-600' : 'text-emerald-600'}`;
+        if (message) { setTimeout(() => { if (dom.importStatusMessage.textContent === message) { dom.importStatusMessage.textContent = ''; } }, 5000);
+        }
+    }
+
+    function updateOnlineStatus(isOnline) { 
+        if (isOnline) { dom.offlineStatus.classList.add('hidden');
+            dom.offlineStatus.classList.remove('flex'); } 
+        else { dom.offlineMessage.textContent = '您目前處於離線狀態，所有變更將在恢復連線後自動同步。';
+            dom.offlineStatus.classList.remove('hidden'); dom.offlineStatus.classList.add('flex'); } 
+    }
+    
+    function handleSortClick(e) { 
+        const button = e.target.closest('.sort-btn');
+        if (!button) return; 
+        state.currentSortOrder = button.dataset.sort; 
+        updateSortButtonsUI(); 
+        renderTasksAndTrash(); 
+    }
+    
+    function updateSortButtonsUI() { 
+        dom.sortControls.querySelectorAll('.sort-btn').forEach(btn => { 
+            const isSelected = btn.dataset.sort === state.currentSortOrder; 
+            
+            btn.classList.toggle('sort-active', isSelected); 
+            btn.classList.toggle('text-slate-500', !isSelected); 
+        });
+    }
+    
+    function handleExport(departmentName) { 
+        const tasksToExport = Array.from(state.localTasksCache.values()).filter(task => !departmentName || task.category === departmentName);
+        const dataToExport = { departments: state.departments, tasks: tasksToExport.map(task => { if (task.createdAt && task.createdAt.toDate) { return { ...task, createdAt: task.createdAt.toDate().toISOString() }; } return task; }), };
+        const dataStr = JSON.stringify(dataToExport, null, 2); 
+        const blob = new Blob([dataStr], { type: "application/json" }); 
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); 
+        a.href = url; 
+        a.download = `tasks-backup-${departmentName || 'all'}-${new Date().toISOString().slice(0,10)}.json`; 
+        document.body.appendChild(a); 
+        a.click(); 
+        document.body.removeChild(a); 
+        URL.revokeObjectURL(url); 
+        showStatusMessage('資料已成功匯出！');
+    }
+    
+    async function handleImportFromText() {
+        const jsonText = dom.importTextarea.value;
+        const targetDepartment = dom.importTaskDepartment.value;
+        if (!jsonText.trim()) { return showImportStatusMessage('請貼上 JSON 內容');
+        }
+        try {
+            const data = JSON.parse(jsonText);
+            if (typeof data !== 'object' || data === null || !data.tasks || !Array.isArray(data.tasks)) {
+                throw new Error('無效的格式：內容需包含一個 "tasks" 陣列。');
+            }
+            if (!confirm(`您確定要匯入 ${data.tasks.length} 個任務嗎？`)) return;
+            dom.confirmImportBtn.disabled = true;
+            showImportStatusMessage(`正在匯入 ${data.tasks.length} 個任務...`, false);
+
+            const batch = writeBatch(state.db);
+            const importedTaskIds = [];
+            const existingDepartmentNames = state.departments.map(c => c.name);
+
+            data.tasks.forEach(task => {
+                const newDocRef = doc(collection(state.db, 'tasks'));
+                importedTaskIds.push(newDocRef.id);
+                let taskTimestamp;
+       
+                if (task.createdAt && typeof task.createdAt === 'string') {
+                    const date = new Date(task.createdAt);
+                    if (!isNaN(date.getTime())) { taskTimestamp = Timestamp.fromDate(date); } 
+                 
+                    else { taskTimestamp = serverTimestamp(); }
+                } else { taskTimestamp = serverTimestamp(); }
+
+                let finalDepartment;
+                if (targetDepartment !== '__AUTO__') { 
+                    finalDepartment = targetDepartment; } 
+                else if (task.category && existingDepartmentNames.includes(task.category)) { finalDepartment = task.category; } 
+                else { finalDepartment = existingDepartmentNames.length > 0 ? existingDepartmentNames[0] : '未分類';
+                }
+
+                const newTaskData = {
+                    title: task.title || '無標題任務', 
+                    description: task.description || '',
+                    priority: task.priority || '中', 
+                    status: task.status || STATUSES.TODO,
+                    category: finalDepartment, 
+                    assignee: task.assignee || '未指派',
+                    creatorUid: state.auth.currentUser.uid, // <<-- 新增這一行
+                    createdBy: task.createdBy || state.userName, 
+                    createdAt: taskTimestamp,
+                    dueDate: task.dueDate || null, 
+                    subtasks: task.subtasks || [],
+                    history: task.history || [{ status: task.status || STATUSES.TODO, reason: '匯入建立', timestamp: Timestamp.now(), user: state.userName }]
+                };
+                batch.set(newDocRef, newTaskData);
+            });
+            
+            await batch.commit();
+            state.lastImportIds = { tasks: importedTaskIds, departments: [] };
+            dom.importTextarea.value = '';
+            dom.importModal.classList.add('hidden'); dom.importModal.classList.remove('flex');
+            showUndoNotification(`成功匯入 ${importedTaskIds.length} 個任務！`);
+        } catch (error) {
+            console.error("匯入失敗:", error);
+            showImportStatusMessage(`匯入失敗: ${error.message}`);
+        } finally {
+            dom.confirmImportBtn.disabled = false;
+        }
+    }
+
+    function showUndoNotification(message) {
+        if (state.undoTimeout) clearTimeout(state.undoTimeout);
+        dom.undoMessage.textContent = message;
+        dom.undoBar.classList.add('show');
+        state.undoTimeout = setTimeout(() => {
+            dom.undoBar.classList.remove('show');
+            state.lastImportIds = null;
+        }, 10000);
+    }
+
+    async function handleUndoImport() {
+        if (!state.lastImportIds || state.lastImportIds.tasks.length === 0) return;
+        const batch = writeBatch(state.db);
+        state.lastImportIds.tasks.forEach(id => batch.delete(doc(state.db, 'tasks', id)));
+        state.lastImportIds.departments.forEach(id => batch.delete(doc(state.db, 'categories', id)));
+        try {
+            await batch.commit();
+            if (state.undoTimeout) clearTimeout(state.undoTimeout);
+            dom.undoBar.classList.remove('show');
+            showStatusMessage('已成功復原上次的匯入。');
+            state.lastImportIds = null;
+        } catch (error) {
+            console.error('復原匯入失敗:', error);
+            showStatusMessage('復原失敗，請稍後再試。', true);
+        }
+    }
+
+    // ==================== LINE 自動催辦相關功能 ====================
+    
+    // 發送 LINE 訊息
+    async function sendLineMessage(to, message) {
+        if (!lineConfig.channelAccessToken) {
+            console.error('LINE Channel Access Token 未設定');
+            showStatusMessage('請先在 env.js 中設定 LINE Channel Access Token', true);
+            return false;
+        }
+
+        const url = 'https://api.line.me/v2/bot/message/push';
+        const payload = {
+            to: to,
+            messages: [{
+                type: 'text',
+                text: message
+            }]
+        };
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${lineConfig.channelAccessToken}`
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                console.error('LINE API 錯誤:', error);
+                showStatusMessage(`LINE 發送失敗: ${error.message}`, true);
+                return false;
+            }
+
+            return true;
+        } catch (error) {
+            console.error('LINE 發送錯誤:', error);
+            showStatusMessage('LINE 發送失敗', true);
+            return false;
+        }
+    }
+
+    // 取得到期任務並格式化為 LINE 訊息
+    function formatDueTasksForLine() {
+        const { overdue, dueToday } = getDueAndOverdueTasks();
+        
+        if (overdue.length === 0 && dueToday.length === 0) {
+            return null;
+        }
+
+        let message = '🔔 【任務催辦通知】\n\n';
+        
+        if (overdue.length > 0) {
+            message += `⚠️ 已過期任務 (${overdue.length} 項)：\n`;
+            overdue.forEach((task, index) => {
+                const dueDate = task.dueDate ? new Date(task.dueDate).toLocaleDateString('zh-TW') : '未設定';
+                message += `${index + 1}. ${task.title}\n`;
+                message += `   負責人：${task.assignee || '未指派'}\n`;
+                message += `   截止日期：${dueDate}\n\n`;
+            });
+        }
+        
+        if (dueToday.length > 0) {
+            message += `📅 今日到期任務 (${dueToday.length} 項)：\n`;
+            dueToday.forEach((task, index) => {
+                message += `${index + 1}. ${task.title}\n`;
+                message += `   負責人：${task.assignee || '未指派'}\n\n`;
+            });
+        }
+        
+        message += '請儘速回報進度，謝謝！\n\n---\n工作任務追蹤平台';
+        
+        return message;
+    }
+
+    // 執行自動催辦
+    async function executeLineAutoRemind() {
+        if (!state.lineAutoRemindConfig.enabled || !state.lineAutoRemindConfig.recipientId) {
+            return;
+        }
+
+        const message = formatDueTasksForLine();
+        if (!message) {
+            console.log('目前無到期任務需要催辦');
+            return;
+        }
+
+        const { overdue, dueToday } = getDueAndOverdueTasks();
+        const success = await sendLineMessage(state.lineAutoRemindConfig.recipientId, message);
+        if (success) {
+            console.log('LINE 自動催辦已發送');
+            
+            // 記錄發送歷史
+            const allTasks = [...overdue, ...dueToday];
+            for (const task of allTasks) {
+                await addReminderHistory(task.id, 'LINE (自動)');
+            }
+        }
+    }
+
+    // 載入 LINE 設定到 UI
+    function loadLineAutoRemindConfig() {
+        const config = state.lineAutoRemindConfig;
+        dom.enableLineAutoRemind.checked = config.enabled;
+        dom.lineRemindTime.value = config.time;
+        dom.lineRecipientType.value = config.recipientType;
+        dom.lineRecipientId.value = config.recipientId;
+    }
+
+    // 儲存 LINE 設定
+    function saveLineAutoRemindConfig() {
+        const config = {
+            enabled: dom.enableLineAutoRemind.checked,
+            time: dom.lineRemindTime.value,
+            recipientType: dom.lineRecipientType.value,
+            recipientId: dom.lineRecipientId.value
+        };
+        
+        state.lineAutoRemindConfig = config;
+        localStorage.setItem('lineAutoRemindConfig', JSON.stringify(config));
+        console.log('LINE 自動催辦設定已儲存', config);
+    }
+
+    // 設定定時檢查（每分鐘檢查一次是否到達設定時間）
+    function setupLineAutoRemindScheduler() {
+        setInterval(() => {
+            const config = state.lineAutoRemindConfig;
+            if (!config.enabled || !config.recipientId) return;
+
+            const now = new Date();
+            const [hours, minutes] = config.time.split(':').map(Number);
+            const scheduledTime = new Date();
+            scheduledTime.setHours(hours, minutes, 0, 0);
+
+            // 如果當前時間在設定時間的 0-59 秒內，執行催辦
+            const timeDiff = now.getTime() - scheduledTime.getTime();
+            if (timeDiff >= 0 && timeDiff < 60000) {
+                executeLineAutoRemind();
+            }
+        }, 60000); // 每分鐘檢查一次
+    }
+
+    // LINE 自動催辦事件監聽器
+    if (dom.lineAutoRemindSettingsBtn) {
+        dom.lineAutoRemindSettingsBtn.addEventListener('click', () => {
+            loadLineAutoRemindConfig();
+            dom.lineAutoRemindModal.classList.remove('hidden');
+            dom.lineAutoRemindModal.classList.add('flex');
+        });
+    }
+
+    if (dom.closeLineAutoRemindBtn) {
+        dom.closeLineAutoRemindBtn.addEventListener('click', () => {
+            dom.lineAutoRemindModal.classList.add('hidden');
+            dom.lineAutoRemindModal.classList.remove('flex');
+        });
+    }
+
+    if (dom.saveLineAutoRemindBtn) {
+        dom.saveLineAutoRemindBtn.addEventListener('click', () => {
+            if (!dom.lineRecipientId.value.trim()) {
+                alert('請輸入 LINE 接收者 ID');
+                return;
+            }
+            
+            saveLineAutoRemindConfig();
+            dom.lineAutoRemindModal.classList.add('hidden');
+            dom.lineAutoRemindModal.classList.remove('flex');
+            showStatusMessage('LINE 自動催辦設定已儲存', false);
+        });
+    }
+
+    if (dom.testLineSendBtn) {
+        dom.testLineSendBtn.addEventListener('click', async () => {
+            const recipientId = dom.lineRecipientId.value.trim();
+            if (!recipientId) {
+                alert('請先輸入 LINE 接收者 ID');
+                return;
+            }
+
+            const testMessage = '這是一則測試訊息，如果您收到此訊息，表示 LINE 自動催辦功能已設定成功！';
+            const success = await sendLineMessage(recipientId, testMessage);
+            if (success) {
+                alert('測試訊息已發送，請檢查 LINE 是否收到');
+            }
+        });
+    }
+
+    // 在應用程式啟動後載入設定並啟動排程器
+    loadLineAutoRemindConfig();
+    setupLineAutoRemindScheduler();
+
+    startApp();
+});
+</script>
+</body>
+</html>
